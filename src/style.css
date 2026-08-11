@@ -1,0 +1,166 @@
+:root {
+  --fg: #dfe7f2;
+  --dim: #8d9bb0;
+  --accent: #7fc4ff;
+  --panel: rgba(10, 14, 22, 0.62);
+  --border: rgba(140, 175, 220, 0.18);
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #000;
+  color: var(--fg);
+  font: 13px/1.5 "Inter", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+#view {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  touch-action: none;
+  cursor: default;
+}
+#view.grabbing { cursor: grabbing; }
+
+/* ---------- 天体标签 ---------- */
+#labels {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 5;
+}
+
+.tag {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: flex;
+  align-items: center;
+  padding: 1px 6px;
+  white-space: nowrap;
+  user-select: none;
+  -webkit-user-select: none;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--tc, #9aa5b1);
+  text-shadow: 0 0 6px #000, 0 0 3px #000, 0 1px 2px #000;
+  /* 不吃鼠标事件：拖拽/滚轮全部交给画布，点击靠画布侧的屏幕空间拾取 */
+  pointer-events: none;
+  border-radius: 3px;
+  transform-origin: 0 50%;
+  transition: color 0.12s, background-color 0.12s;
+  will-change: transform;
+}
+.tag.hovered { background: rgba(90, 150, 220, 0.24); }
+.tag.selected { background: rgba(120, 180, 255, 0.2); font-weight: 600; }
+.tag.k-moon,
+.tag.k-minor { font-size: 10px; }
+.tag.k-star { font-size: 12px; }
+
+/* ---------- HUD ---------- */
+#hud {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 10;
+  user-select: none;
+  -webkit-user-select: none;
+}
+#hud > * { pointer-events: auto; }
+
+#topbar {
+  position: absolute;
+  top: 14px;
+  left: 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.brand {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.22em;
+  color: #eaf2ff;
+}
+.brand span {
+  display: block;
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 0.16em;
+  color: var(--dim);
+  margin-top: 2px;
+}
+.chip {
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel);
+  backdrop-filter: blur(8px);
+  font-size: 11px;
+  color: var(--dim);
+}
+.chip.focus { color: #0a1018; background: var(--accent); border-color: transparent; font-weight: 600; }
+
+.chip.mono { font-variant-numeric: tabular-nums; letter-spacing: 0.02em; }
+
+.hidden { display: none !important; }
+
+.panel {
+  position: absolute;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  backdrop-filter: blur(10px);
+  padding: 10px 12px;
+}
+.panel.hidden { display: none; }
+.panel-title { font-size: 11px; color: var(--dim); letter-spacing: 0.1em; margin-bottom: 6px; }
+
+#info { top: 14px; right: 16px; min-width: 216px; }
+.info-title { display: flex; align-items: baseline; gap: 7px; margin-bottom: 8px; }
+#info-name { font-size: 17px; font-weight: 600; }
+#info-en { font-size: 11px; color: var(--dim); letter-spacing: 0.06em; }
+.info-hint { margin-top: 8px; font-size: 10px; color: var(--dim); }
+
+#help { bottom: 14px; left: 16px; max-width: 330px; }
+#help.hidden { display: none; }
+
+dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; margin: 0; }
+dt { color: var(--dim); font-size: 11px; }
+dd { margin: 0; font-size: 11px; font-variant-numeric: tabular-nums; }
+
+kbd {
+  display: inline-block;
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 3px;
+  font: inherit;
+  font-size: 10px;
+  color: var(--fg);
+}
+
+/* ---------- 载入 ---------- */
+#loading {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  background: #05070c;
+  transition: opacity 0.6s ease;
+}
+#loading.done { opacity: 0; pointer-events: none; }
+.loader-box { width: 260px; text-align: center; }
+.loader-title { font-size: 20px; letter-spacing: 0.4em; margin-bottom: 16px; color: #eaf2ff; }
+.loader-bar { height: 2px; background: rgba(255, 255, 255, 0.12); overflow: hidden; }
+.loader-bar i { display: block; height: 100%; width: 0%; background: var(--accent); transition: width 0.2s; }
+.loader-msg { margin-top: 10px; font-size: 11px; color: var(--dim); }
