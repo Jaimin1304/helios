@@ -1,7 +1,7 @@
 import {
   BufferGeometry, Float32BufferAttribute, LineBasicMaterial, LineSegments, Color, Group,
 } from 'three';
-import { AU_KM, KM_TO_UNITS, FAR_UNITS, FOV, DEG } from '../config.js';
+import { AU_KM, KM_TO_UNITS, FOV, DEG } from '../config.js';
 
 /**
  * 以太阳为原点的黄道面坐标系（黄道面就是场景的 z = 0 平面）。
@@ -11,9 +11,12 @@ import { AU_KM, KM_TO_UNITS, FAR_UNITS, FOV, DEG } from '../config.js';
  * 视野尺度挑一个 1-2-5 进制的格距 unit，然后整体 scale(unit)——
  * 格距和覆盖范围同时缩放，一份几何体走遍所有尺度。
  */
-const HALF = 50; // 每个方向 ±50 格
-const MAJOR = 10; // 每 10 格一根主线
+/** 格距固定为 1 AU：太阳系里唯一有物理意义的长度单位，读数才有意义 */
+const HALF = 50; // 每个方向 ±50 AU（覆盖到柯伊伯带外缘）
+const MAJOR = 10; // 每 10 AU 一根主线
 const CIRCLE_SEGMENTS = 240;
+/** 相邻刻度标签的最小屏幕间距 */
+const TICK_MIN_GAP_PX = 34;
 const SPOKES = 24; // 极坐标每 15° 一根
 
 const COLOR_MINOR = '#4a6b8c';
@@ -89,13 +92,6 @@ function buildPolar(major) {
   return pts;
 }
 
-/** 取 1-2-5 进制的"整数感"步长 */
-function niceStep(v) {
-  const p = 10 ** Math.floor(Math.log10(v));
-  const m = v / p;
-  return (m < 2 ? 1 : m < 5 ? 2 : 5) * p;
-}
-
 export function formatUnit(km) {
   if (km >= 0.005 * AU_KM) {
     const au = km / AU_KM;
@@ -107,9 +103,10 @@ export function formatUnit(km) {
 }
 
 export class EclipticGrid {
-  constructor(scene) {
+  constructor(scene, tickContainer) {
     this.mode = 'off'; // off | rect | polar
-    this.unitKm = AU_KM;
+    this.unitKm = AU_KM; // 恒为 1 AU
+    this.tickStep = 10;
 
     this.group = new Group();
     this.group.frustumCulled = false;
@@ -131,16 +128,84 @@ export class EclipticGrid {
       o.visible = false;
       this.group.add(o);
     }
+
+    // ---- 刻度（DOM 覆盖层）----
+    // 沿两条坐标轴标注 AU 读数，标签颜色跟着轴走，一眼能对上是哪条轴。
+    this.ticks = [];
+    if (tickContainer) {
+      for (let r = 1; r <= HALF; r++) {
+        for (const [axis, color] of [['x', COLOR_AXIS_X], ['y', COLOR_AXIS_Y]]) {
+          for (const sign of [1, -1]) { // 两个方向都标
+            const el = document.createElement('div');
+            el.className = 'gridtick';
+            // 刻度只作距离参照，两个方向都用无符号读数
+            el.textContent = `${r} AU`;
+            el.style.color = color;
+            el.style.display = 'none';
+            tickContainer.appendChild(el);
+            this.ticks.push({ el, r, axis, sign, shown: false });
+          }
+        }
+      }
+    }
+  }
+
+  setMode(mode) {
+    this.mode = mode;
+    const on = mode !== 'off';
+    for (const o of this.rect) o.visible = mode === 'rect';
+    for (const o of this.polar) o.visible = mode === 'polar';
+    for (const o of this.axes) o.visible = on;
+    if (!on) for (const t of this.ticks) this.#hideTick(t);
+    return mode;
   }
 
   /** 关 → 方格 → 极坐标 → 关 */
   cycle() {
-    this.mode = this.mode === 'off' ? 'rect' : this.mode === 'rect' ? 'polar' : 'off';
-    const on = this.mode !== 'off';
-    for (const o of this.rect) o.visible = this.mode === 'rect';
-    for (const o of this.polar) o.visible = this.mode === 'polar';
-    for (const o of this.axes) o.visible = on;
-    return this.mode;
+    return this.setMode(this.mode === 'off' ? 'rect' : this.mode === 'rect' ? 'polar' : 'off');
+  }
+
+  #hideTick(t) {
+    if (t.shown) {
+      t.el.style.display = 'none';
+      t.shown = false;
+    }
+  }
+
+  /**
+   * 刻度标签定位。传入把「黄道系 km」投到屏幕的回调，由主循环提供
+   * （那边已经有相机基向量和像素焦距）。
+   * @param {(x:number,y:number,z:number)=>({x:number,y:number,visible:boolean})} project
+   */
+  updateTicks(project, width, height) {
+    if (this.mode === 'off' || !this.ticks.length) return;
+    // 透视会把远处的刻度挤到一起，按屏幕间距再抽一次（四个半轴各自独立）
+    const lastPlaced = { 'x1': null, 'x-1': null, 'y1': null, 'y-1': null };
+    for (const t of this.ticks) {
+      // 读数太密就抽稀：只显示步长的整数倍
+      if (t.r % this.tickStep !== 0) {
+        this.#hideTick(t);
+        continue;
+      }
+      const d = t.r * AU_KM * t.sign;
+      const p = project(t.axis === 'x' ? d : 0, t.axis === 'y' ? d : 0, 0);
+      if (!p.visible || p.x < 4 || p.x > width - 40 || p.y < 4 || p.y > height - 12) {
+        this.#hideTick(t);
+        continue;
+      }
+      const key = t.axis + t.sign;
+      const prev = lastPlaced[key];
+      if (prev && Math.hypot(p.x - prev.x, p.y - prev.y) < TICK_MIN_GAP_PX) {
+        this.#hideTick(t);
+        continue;
+      }
+      lastPlaced[key] = p;
+      t.el.style.transform = `translate3d(${p.x.toFixed(1)}px, ${p.y.toFixed(1)}px, 0)`;
+      if (!t.shown) {
+        t.el.style.display = 'block';
+        t.shown = true;
+      }
+    }
   }
 
   /**
@@ -152,24 +217,20 @@ export class EclipticGrid {
   update(sunRel, viewScaleKm, sunDistKm, viewportH) {
     if (this.mode === 'off') return;
 
-    // 目标：一格约 110 px。同时不让格子小到整张网格缩成太阳边上的一个点，
-    // 所以再用"到太阳的距离 / 400"兜底。
-    const kmPerPx = (2 * viewScaleKm * Math.tan((FOV * DEG) / 2)) / viewportH;
-    let unit = niceStep(Math.max(kmPerPx * 110, sunDistKm / 400, 1));
-    // 整张网格必须留在远裁面里，否则边缘会被裁出一道直边
-    const maxUnitKm = (FAR_UNITS * 0.45) / HALF / KM_TO_UNITS;
-    if (unit > maxUnitKm) unit = niceStep(maxUnitKm / 2);
-    this.unitKm = unit;
-
     this.group.position.copy(sunRel);
-    this.group.scale.setScalar(unit * KM_TO_UNITS);
+    this.group.scale.setScalar(AU_KM * KM_TO_UNITS); // 一格恒为 1 AU
 
-    // 格子在屏幕上太小就淡出，免得糊成一片
-    const cellPx = unit / Math.max(kmPerPx, 1e-9);
-    const fade = Math.min(1, Math.max(0, (cellPx - 4) / 20));
-    this.matMinor.opacity = 0.16 * fade;
-    this.matMajor.opacity = 0.34 * fade;
-    this.matAxisX.opacity = 0.55 * fade;
-    this.matAxisY.opacity = 0.55 * fade;
+    // 一格在屏幕上占多少像素，决定细线的淡出和刻度的抽稀密度
+    const kmPerPx = (2 * viewScaleKm * Math.tan((FOV * DEG) / 2)) / viewportH;
+    const cellPx = AU_KM / Math.max(kmPerPx, 1e-9);
+
+    const fade = Math.min(1, Math.max(0, (cellPx - 3) / 18));
+    this.matMinor.opacity = 0.11 * fade;
+    this.matMajor.opacity = 0.34 * Math.min(1, Math.max(0, (cellPx * MAJOR - 3) / 30));
+    this.matAxisX.opacity = 0.6 * Math.min(1, Math.max(0, cellPx * MAJOR / 12));
+    this.matAxisY.opacity = this.matAxisX.opacity;
+
+    // 刻度抽稀：贴近时逐 AU 标，拉远后 5 AU、10 AU
+    this.tickStep = cellPx > 55 ? 1 : cellPx > 13 ? 5 : 10;
   }
 }

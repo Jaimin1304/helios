@@ -5,7 +5,7 @@ import {
 } from 'three';
 import { AU_KM, KM_TO_UNITS, DOT_SIZE_PX, DOT_TAKEOVER_PX, DOT_FULL_PX } from '../config.js';
 import {
-  makeSurface, makeRingTexture, getGlowTexture, getCoronaTexture, getStarburstTexture,
+  makeSurface, makeRingTexture, getGlowTexture, getStarburstTexture, getGlareTexture,
 } from './textures.js';
 import { pickTexture } from './assets.js';
 import { smoothstep } from './noise.js';
@@ -24,6 +24,15 @@ const LIMB_EDGE = 0.34;
 const STAR_OVERDRIVE = 1.55;
 /** 星芒的屏幕尺寸上限（像素），免得贴近时糊满整屏 */
 const STAR_FLARE_MAX_PX = 900;
+/** 相机到恒星近于该距离时不画星芒，到 FADE 距离恢复满强度（AU） */
+const STAR_FLARE_MIN_AU = 2.0;
+const STAR_FLARE_FADE_AU = 2.6;
+/** 面纱眩光：1 AU 处的强度，以及它铺开的屏幕尺寸 */
+const GLARE_GAIN = 2;
+const GLARE_SPAN_PX = 2000;
+/** 相机近于该距离时不画眩光（贴脸看日面时别挡路），到 FADE 距离恢复（AU） */
+const GLARE_MIN_AU = 0.03;
+const GLARE_FADE_AU = 0.06;
 
 /** 按天体大小挑球体细分 */
 function segmentsFor(body) {
@@ -133,30 +142,41 @@ export class BodyView {
     this.dotSizePx = DOT_SIZE_PX[body.kind] ?? 6;
     scene.add(this.dot);
 
-    // ---- 恒星光晕：贴边热晕 + 流苏日冕，两层都跟着日面尺寸走 ----
-    // 全部 depthTest:true —— 精灵面片过日心，被日面球体挡掉的正好是圆面内部，
-    // 于是这些叠加光只出现在临边之外，既不糊掉日面细节，凌日的行星也不会被冲掉。
-    this.starLayers = [];
+    // ---- 恒星贴边热晕 ----
+    // depthTest:true —— 精灵面片过日心，被日面球体挡掉的正好是圆面内部，
+    // 于是这层叠加光只出现在临边之外，既不糊掉日面细节，凌日的行星也不会被冲掉。
+    this.halo = null;
     if (body.kind === 'star') {
-      const layer = (map, color, scale, order) => {
-        const s = new Sprite(new SpriteMaterial({
-          map, color: new Color(color),
-          transparent: true,
-          blending: AdditiveBlending,
-          depthWrite: false,
-          depthTest: true,
-          toneMapped: false,
-          opacity: 0,
-        }));
-        s.frustumCulled = false;
-        s.renderOrder = order;
-        s.scale.setScalar(radiusUnits * scale);
-        scene.add(s);
-        this.starLayers.push(s);
-        return s;
-      };
-      this.halo = layer(getGlowTexture(), '#ffe6b8', 2.4, 3);
-      this.corona = layer(getCoronaTexture(), '#ffd9a0', 7.5, 3);
+      this.halo = new Sprite(new SpriteMaterial({
+        map: getGlowTexture(),
+        color: new Color('#ffe6b8'),
+        transparent: true,
+        blending: AdditiveBlending,
+        depthWrite: false,
+        depthTest: true,
+        toneMapped: false,
+        opacity: 0,
+      }));
+      this.halo.frustumCulled = false;
+      this.halo.renderOrder = 3;
+      this.halo.scale.setScalar(radiusUnits * 2.4);
+      scene.add(this.halo);
+
+      // 面纱眩光：唯一一层 depthTest:false 的，因为它模拟的是光进入镜头之后
+      // 在镜头内部散射出来的雾——它本来就该盖在整个画面上，而不是被几何体挡住。
+      this.glare = new Sprite(new SpriteMaterial({
+        map: getGlareTexture(),
+        color: new Color('#fff3dc'),
+        transparent: true,
+        blending: AdditiveBlending,
+        depthWrite: false,
+        depthTest: false,
+        toneMapped: false,
+        opacity: 0,
+      }));
+      this.glare.frustumCulled = false;
+      this.glare.renderOrder = 50; // 最后画
+      scene.add(this.glare);
     }
 
     // ---- 星环 ----
@@ -278,7 +298,7 @@ export class BodyView {
     if (this.rings) this.rings.position.copy(rel);
     if (this.clouds) this.clouds.position.copy(rel);
     this.dot.position.copy(rel);
-    if (this.corona) this.corona.position.copy(rel);
+    if (this.glare) this.glare.position.copy(rel);
 
     // 球体：像素半径 < 0.35 就没必要画了
     const meshVisible = onScreen && pxRadius > 0.35;
@@ -295,13 +315,20 @@ export class BodyView {
     // 光点：视半径越小越显眼
     const a = 1 - smoothstep(DOT_FULL_PX, DOT_TAKEOVER_PX, pxRadius);
     if (this.body.kind === 'star') {
-      // 恒星的星芒不随距离消失——强光源在任何距离都该带芒。
-      // 远处是一颗耀眼的星，靠近后星芒跟着日面一起放大，绕在临边之外。
-      this.dot.visible = onScreen;
-      this.dot.material.opacity = 0.55 + 0.45 * a;
-      const px = Math.min(Math.max(this.dotSizePx, pxRadius * 3.2), STAR_FLARE_MAX_PX);
-      const s = px * unitsPerPixel;
-      this.dot.scale.set(s, s, 1);
+      // 恒星的星芒在远处代表"一颗耀眼的星"；但抵近到 STAR_FLARE_MIN_AU 以内，
+      // 日面已经解析得很大，衍射芒反而显得假，这时交给面纱眩光独自表现。
+      const near = smoothstep(
+        STAR_FLARE_MIN_AU * AU_KM,
+        STAR_FLARE_FADE_AU * AU_KM,
+        this.body.screen.dist,
+      );
+      this.dot.material.opacity = (0.55 + 0.45 * a) * near;
+      this.dot.visible = onScreen && this.dot.material.opacity > 0.004;
+      if (this.dot.visible) {
+        const px = Math.min(Math.max(this.dotSizePx, pxRadius * 3.2), STAR_FLARE_MAX_PX);
+        const s = px * unitsPerPixel;
+        this.dot.scale.set(s, s, 1);
+      }
     } else {
       this.dot.visible = onScreen && a > 0.004;
       if (this.dot.visible) {
@@ -311,15 +338,27 @@ export class BodyView {
       }
     }
 
-    if (this.starLayers.length) {
-      // 日面被解析出来之后这两层才有意义，否则观感全交给星芒
+    if (this.halo) {
+      // 日面被解析出来之后热晕才有意义，否则观感全交给星芒
       const solar = smoothstep(1.2, 6, pxRadius);
-      const on = onScreen && solar > 0.01;
-      this.halo.visible = on;
+      this.halo.visible = onScreen && solar > 0.01;
       this.halo.material.opacity = 0.85 * solar;
-      this.corona.visible = on;
-      this.corona.material.opacity = 0.7 * solar;
-      this.corona.material.rotation = this.body.spin * 0.12; // 日冕缓慢转动
+
+      // 面纱眩光强度直接跟进入镜头的太阳辐照度走（平方反比），
+      // 于是地球附近刺眼、木星轨道外基本没有——这正是真实相机的行为。
+      // 被行星挡住时立刻消失（日食/凌日）。
+      // 但抵近到 GLARE_MIN_AU 以内就撤掉：那个距离上用户多半是在看日面本身，
+      // 一层洗白整屏的光雾只会挡路。
+      const au = this.body.screen.dist / AU_KM;
+      const irr = 1 / Math.max(au * au, 1e-9);
+      const inner = smoothstep(GLARE_MIN_AU, GLARE_FADE_AU, au);
+      const amount = this.body.screen.occluded ? 0 : Math.min(1, GLARE_GAIN * irr) * inner;
+      this.glare.visible = onScreen && amount > 0.004;
+      if (this.glare.visible) {
+        this.glare.material.opacity = amount;
+        const s = GLARE_SPAN_PX * (0.5 + 0.5 * Math.min(1, irr)) * unitsPerPixel;
+        this.glare.scale.set(s, s, 1);
+      }
     }
   }
 }

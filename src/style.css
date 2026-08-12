@@ -30,13 +30,15 @@ html, body {
 #view.grabbing { cursor: grabbing; }
 
 /* ---------- 天体标签 ---------- */
-#labels {
+#labels,
+#gridticks {
   position: fixed;
   inset: 0;
   pointer-events: none;
   overflow: hidden;
   z-index: 5;
 }
+#gridticks { z-index: 4; }
 
 .tag {
   position: absolute;
@@ -64,6 +66,24 @@ html, body {
 .tag.k-moon,
 .tag.k-minor { font-size: 10px; }
 .tag.k-star { font-size: 12px; }
+
+/* 黄道面坐标系的 AU 刻度 */
+.gridtick {
+  position: absolute;
+  left: 0;
+  top: 0;
+  padding: 0 3px;
+  transform-origin: 0 0;
+  margin: 3px 0 0 5px;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  opacity: 0.85;
+  text-shadow: 0 0 5px #000, 0 0 2px #000;
+  pointer-events: none;
+  user-select: none;
+}
 
 /* ---------- HUD ---------- */
 #hud {

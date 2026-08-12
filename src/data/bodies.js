@@ -117,18 +117,6 @@ export const BODIES = [
     orbit: { ...km(384400, 0.0549, 5.145, 125.08, 318.15, 135.27, 27.321582), frame: 'ecliptic' },
   },
 
-  // ────────────────────────────── 火卫 ──────────────────────────────
-  {
-    id: 'phobos', name: '火卫一', en: 'Phobos', parent: 'mars', kind: 'moon', radius: 11.267,
-    style: 'cratered', craters: 88, palette: ['#2a2320', '#4d443c', '#6d6357', '#8a8073'],
-    orbit: km(9376, 0.0151, 1.093, 0, 150.2, 92.5, 0.318910),
-  },
-  {
-    id: 'deimos', name: '火卫二', en: 'Deimos', parent: 'mars', kind: 'moon', radius: 6.2,
-    style: 'cratered', craters: 62, palette: ['#2e2722', '#544a40', '#75695b', '#948877'],
-    orbit: km(23463.2, 0.00033, 0.93, 0, 260.7, 311.0, 1.263),
-  },
-
   // ────────────────────────────── 木卫 ──────────────────────────────
   {
     id: 'io', name: '木卫一 · 伊奥', en: 'Io', parent: 'jupiter', kind: 'moon', radius: 1821.6,
@@ -149,16 +137,6 @@ export const BODIES = [
     id: 'callisto', name: '木卫四 · 卡利斯托', en: 'Callisto', parent: 'jupiter', kind: 'moon', radius: 2410.3,
     style: 'cratered', craters: 286, palette: ['#241f1b', '#4e463e', '#786d5f', '#968a79'],
     orbit: km(1882700, 0.0074, 0.192, 0, 52.6, 181.4, 16.689018),
-  },
-  {
-    id: 'amalthea', name: '木卫五 · 阿马尔忒亚', en: 'Amalthea', parent: 'jupiter', kind: 'moon', radius: 83.5,
-    style: 'cratered', craters: 53, palette: ['#3c1a12', '#6e2f1e', '#8f4a30', '#a86546'],
-    orbit: km(181365, 0.0032, 0.374, 0, 155.9, 44.0, 0.498179),
-  },
-  {
-    id: 'himalia', name: '木卫六 · 希玛利亚', en: 'Himalia', parent: 'jupiter', kind: 'moon', radius: 69.8,
-    style: 'cratered', craters: 44, palette: ['#221e1a', '#453e35', '#665c4f', '#847968'],
-    orbit: km(11460000, 0.1623, 27.5, 57.2, 331.6, 66.0, 250.56),
   },
 
   // ────────────────────────────── 土卫 ──────────────────────────────
@@ -193,19 +171,9 @@ export const BODIES = [
     orbit: km(1221870, 0.0288, 0.348, 0, 185.7, 210.3, 15.945421),
   },
   {
-    id: 'hyperion', name: '土卫七 · 许珀里翁', en: 'Hyperion', parent: 'saturn', kind: 'moon', radius: 135,
-    style: 'cratered', craters: 132, palette: ['#3a2f24', '#6b5a45', '#8f7c63', '#b09b80'],
-    orbit: km(1481009, 0.1230, 0.568, 0, 324.0, 100.2, 21.276),
-  },
-  {
     id: 'iapetus', name: '土卫八 · 伊阿珀托斯', en: 'Iapetus', parent: 'saturn', kind: 'moon', radius: 734.5,
     style: 'cratered', craters: 143, palette: ['#241d16', '#584c3c', '#a09484', '#d6cfc2'],
     orbit: km(3560820, 0.0286, 15.47, 0, 275.9, 12.0, 79.3215),
-  },
-  {
-    id: 'phoebe', name: '土卫九 · 菲比', en: 'Phoebe', parent: 'saturn', kind: 'moon', radius: 106.5,
-    style: 'cratered', craters: 99, palette: ['#1c1a18', '#3a352f', '#585045', '#736958'],
-    orbit: km(12947780, 0.1635, 175.3, 0, 342.0, 200.0, 550.31),
   },
 
   // ────────────────────────────── 天卫 ──────────────────────────────
@@ -242,16 +210,6 @@ export const BODIES = [
     // 逆行：倾角 >90° 已表达逆行，周期取正
     orbit: km(354759, 0.000016, 156.885, 0, 344.0, 77.0, 5.876854),
   },
-  {
-    id: 'proteus', name: '海卫八 · 普罗透斯', en: 'Proteus', parent: 'neptune', kind: 'moon', radius: 210,
-    style: 'cratered', craters: 77, palette: ['#232326', '#43434a', '#5f5f68', '#7b7b85'],
-    orbit: km(117647, 0.00053, 0.524, 0, 60.0, 210.0, 1.122315),
-  },
-  {
-    id: 'nereid', name: '海卫二 · 涅瑞伊得', en: 'Nereid', parent: 'neptune', kind: 'moon', radius: 170,
-    style: 'cratered', craters: 66, palette: ['#2b2b30', '#4f4f57', '#70707a', '#8f8f9a'],
-    orbit: km(5513818, 0.7507, 7.232, 0, 296.3, 45.0, 360.13619),
-  },
 
   // ────────────────────────── 矮行星 / 小天体 ──────────────────────────
   {
@@ -259,18 +217,6 @@ export const BODIES = [
     rotHours: 9.074, style: 'cratered', craters: 132,
     palette: ['#33302b', '#5e5850', '#837b70', '#a49b8d'],
     orbit: au(2.7675, 0.07582, 10.593, 80.393, 73.597, 95.989, 1681.63),
-  },
-  {
-    id: 'vesta', name: '灶神星', en: 'Vesta', parent: 'sun', kind: 'minor', radius: 262.7,
-    rotHours: 5.342, style: 'cratered', craters: 110,
-    palette: ['#443b30', '#7a6c58', '#a2937c', '#c2b49b'],
-    orbit: au(2.3617, 0.08857, 7.1417, 103.851, 151.198, 307.8, 1325.75),
-  },
-  {
-    id: 'pallas', name: '智神星', en: 'Pallas', parent: 'sun', kind: 'minor', radius: 256,
-    rotHours: 7.813, style: 'cratered', craters: 99,
-    palette: ['#2f302c', '#565a52', '#767b70', '#969b8e'],
-    orbit: au(2.7720, 0.22988, 34.837, 173.024, 310.202, 59.1, 1686.0),
   },
   {
     id: 'hygiea', name: '健神星', en: 'Hygiea', parent: 'sun', kind: 'minor', radius: 217,
@@ -288,16 +234,6 @@ export const BODIES = [
     id: 'charon', name: '冥卫一 · 卡戎', en: 'Charon', parent: 'pluto', kind: 'moon', radius: 606,
     style: 'cratered', craters: 99, palette: ['#3a3a3e', '#6a6a70', '#909096', '#b2b2b8'],
     orbit: km(19591, 0.0002, 0.08, 0, 0, 60.0, 6.3872),
-  },
-  {
-    id: 'nix', name: '冥卫二 · 尼克斯', en: 'Nix', parent: 'pluto', kind: 'moon', radius: 24.5,
-    style: 'icy', cracks: 12, palette: ['#7f7f86', '#b4b4bc', '#d8d8de', '#eeeef2'],
-    orbit: km(48694, 0.0020, 0.13, 0, 31.0, 200.0, 24.8548),
-  },
-  {
-    id: 'hydra', name: '冥卫三 · 许德拉', en: 'Hydra', parent: 'pluto', kind: 'moon', radius: 20.5,
-    style: 'icy', cracks: 10, palette: ['#7a7a82', '#b0b0b8', '#d4d4da', '#ececf0'],
-    orbit: km(64738, 0.0059, 0.24, 0, 140.0, 22.0, 38.2018),
   },
   {
     id: 'eris', name: '阋神星', en: 'Eris', parent: 'sun', kind: 'dwarf', radius: 1163,
@@ -339,12 +275,6 @@ export const BODIES = [
     rotHours: 13.19, style: 'icy', cracks: 12,
     palette: ['#565a5e', '#8e939a', '#b6bcc2', '#d6dbe0'],
     orbit: au(39.42, 0.22014, 20.582, 268.55, 72.5, 181.0, 90480.0),
-  },
-  {
-    id: 'arrokoth', name: '天涯海角', en: 'Arrokoth', parent: 'sun', kind: 'minor', radius: 9.1,
-    rotHours: 15.92, style: 'cratered', craters: 22,
-    palette: ['#3a1c14', '#6e3323', '#8f4c34', '#ab6a4c'],
-    orbit: au(44.581, 0.04172, 2.4512, 158.99, 176.0, 317.0, 108700.0),
   },
 ];
 

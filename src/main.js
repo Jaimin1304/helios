@@ -15,6 +15,7 @@ import { BODIES } from './data/bodies.js';
 import { OrbitLine } from './render/orbits.js';
 import { LabelLayer } from './render/labels.js';
 import { EclipticGrid, formatUnit } from './render/grid.js';
+import { Belts } from './render/belts.js';
 import { createSky } from './render/sky.js';
 import { CameraRig } from './control/cameraRig.js';
 import { attachInput } from './control/input.js';
@@ -59,8 +60,9 @@ const views = new Map();
 const orbitLines = [];
 
 const rig = new CameraRig();
-const grid = new EclipticGrid(scene);
+const grid = new EclipticGrid(scene, document.getElementById('gridticks'));
 let labels = null;
+let belts = null;
 
 let selected = null;
 let orbitOpacity = 1; // 0 = 关闭轨道线
@@ -122,6 +124,21 @@ function pick(clientX, clientY) {
   }
   return best;
 }
+
+/** 把黄道系坐标（km，日心）投到屏幕像素，供坐标系刻度定位 */
+const projTmp = new Vector3();
+function projectEcliptic(x, y, z) {
+  projTmp.set(x, y, z).sub(camPosKm);
+  const zc = projTmp.dot(fwd);
+  if (zc <= 1e-9) return PROJ_HIDDEN;
+  const inv = focalPx / zc;
+  return {
+    x: viewW / 2 + projTmp.dot(rightV) * inv,
+    y: viewH / 2 - projTmp.dot(upV) * inv,
+    visible: true,
+  };
+}
+const PROJ_HIDDEN = { x: 0, y: 0, visible: false };
 
 function selectBody(body) {
   selected = body;
@@ -225,6 +242,8 @@ function frame(now) {
   }
 
   grid.update(sunRel, rig.dist, camPosKm.length(), viewH);
+  grid.updateTicks(projectEcliptic, viewW, viewH);
+  belts.update(sunRel, rig.dist, camPosKm.length(), focalPx, system.timeDays);
 
   // 近裁面跟着最近的物体走，远裁面固定覆盖整个已知太阳系
   const nearKm = Number.isFinite(nearestSurface) && nearestSurface > 0
@@ -292,6 +311,10 @@ async function boot() {
     if (i % 2 === 0) await yieldToBrowser();
   }
 
+  hud.progress(1, '正在播撒小行星带与柯伊伯带…');
+  await yieldToBrowser();
+  belts = new Belts(scene, renderer.getPixelRatio());
+
   labels = new LabelLayer(document.getElementById('labels'), system.bodies);
 
   attachInput(canvas, rig, {
@@ -342,6 +365,6 @@ boot();
 
 // 调参用
 window.HELIOS = {
-  system, rig, views, orbitLines, grid, renderer, scene, camera, focusBody,
+  system, rig, views, orbitLines, grid, get belts() { return belts; }, renderer, scene, camera, focusBody,
   get selected() { return selected; },
 };

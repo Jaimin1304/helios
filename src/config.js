@@ -49,7 +49,7 @@ export const EXPOSURE_MIN = 0.15;
 export const EXPOSURE_MAX = 1400;
 export const EXPOSURE_REF_MIN_AU = 0.3;
 export const EXPOSURE_REF_MAX_AU = 45;
-export const SKY_BRIGHTNESS = 0.62; // 星空亮度（会被曝光反向补偿，保持恒定）
+export const SKY_BRIGHTNESS = 0.3; // 星空亮度（toneMapped:false，不受曝光影响）
 export const AMBIENT = 0.02;
 
 // ---- 可见性 / 标签 ----

@@ -316,52 +316,33 @@ export function makeRingTexture(def) {
 }
 
 /**
- * 日冕：径向底色 + 大量放射状流苏。
- * 真实日冕不是干净的圆形辉光，而是一圈长短不一的等离子体流，
- * 加上这层结构之后太阳一下子就"活"了。
+ * 面纱眩光（veiling glare）：极宽、极柔的一层光雾。
+ *
+ * 电影里"刺眼"的观感其实主要不是天体本身有多亮，而是强光在镜头/眼球里
+ * 散射出的这层雾——它会把靠近光源的画面整体提亮、洗淡对比。
+ * 所以这张贴图刻意做得又大又软，靠加法混合铺满一大片。
  */
-let coronaTexture = null;
-export function getCoronaTexture() {
-  if (coronaTexture) return coronaTexture;
+let glareTexture = null;
+export function getGlareTexture() {
+  if (glareTexture) return glareTexture;
   const N = 512;
   const c = N / 2;
   const canvas = makeCanvas(N, N);
   const ctx = canvas.getContext('2d');
-  const rand = rng(seedOf('corona'));
-
-  const base = ctx.createRadialGradient(c, c, N * 0.14, c, c, N * 0.5);
-  base.addColorStop(0.00, 'rgba(255,244,214,0.90)');
-  base.addColorStop(0.10, 'rgba(255,206,132,0.42)');
-  base.addColorStop(0.30, 'rgba(255,158,68,0.15)');
-  base.addColorStop(0.62, 'rgba(255,126,44,0.045)');
-  base.addColorStop(1.00, 'rgba(255,110,30,0)');
-  ctx.fillStyle = base;
+  const g = ctx.createRadialGradient(c, c, 0, c, c, N * 0.5);
+  g.addColorStop(0.00, 'rgba(255,252,242,0.95)');
+  g.addColorStop(0.05, 'rgba(255,245,218,0.56)');
+  g.addColorStop(0.14, 'rgba(255,228,170,0.27)');
+  g.addColorStop(0.30, 'rgba(255,205,128,0.115)');
+  g.addColorStop(0.55, 'rgba(255,186,102,0.042)');
+  g.addColorStop(0.80, 'rgba(255,172,90,0.013)');
+  g.addColorStop(1.00, 'rgba(255,164,82,0)');
+  ctx.fillStyle = g;
   ctx.fillRect(0, 0, N, N);
 
-  ctx.globalCompositeOperation = 'lighter';
-  ctx.lineCap = 'round';
-  for (let i = 0; i < 220; i++) {
-    const a = rand() * Math.PI * 2;
-    const r0 = N * (0.135 + rand() * 0.03);
-    const r1 = r0 + N * (0.05 + Math.pow(rand(), 1.7) * 0.32);
-    const x0 = c + Math.cos(a) * r0, y0 = c + Math.sin(a) * r0;
-    const x1 = c + Math.cos(a) * r1, y1 = c + Math.sin(a) * r1;
-    const alpha = 0.05 + rand() * 0.13;
-    const g = ctx.createLinearGradient(x0, y0, x1, y1);
-    g.addColorStop(0, `rgba(255,228,170,${alpha})`);
-    g.addColorStop(0.45, `rgba(255,180,96,${alpha * 0.5})`);
-    g.addColorStop(1, 'rgba(255,150,60,0)');
-    ctx.strokeStyle = g;
-    ctx.lineWidth = 1 + rand() * 3.4;
-    ctx.beginPath();
-    ctx.moveTo(x0, y0);
-    ctx.lineTo(x1, y1);
-    ctx.stroke();
-  }
-
-  coronaTexture = new CanvasTexture(canvas);
-  coronaTexture.colorSpace = SRGBColorSpace;
-  return coronaTexture;
+  glareTexture = new CanvasTexture(canvas);
+  glareTexture.colorSpace = SRGBColorSpace;
+  return glareTexture;
 }
 
 /**
