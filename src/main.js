@@ -6,7 +6,7 @@ import {
 import {
   AU_KM, AU_UNITS, DEG, FOV, KM_TO_UNITS, MIN_NEAR_UNITS, MAX_NEAR_UNITS, FAR_UNITS,
   EXPOSURE_EXP, EXPOSURE_MIN, EXPOSURE_MAX, EXPOSURE_REF_MIN_AU, EXPOSURE_REF_MAX_AU,
-  AMBIENT, TIME_SCALE,
+  AMBIENT, TIME_SCALES, TIME_SCALE_DEFAULT_INDEX,
 } from './config.js';
 import { SolarSystem } from './sim/system.js';
 import { BodyView } from './render/bodyView.js';
@@ -14,12 +14,16 @@ import { preloadBodyTextures } from './render/assets.js';
 import { BODIES } from './data/bodies.js';
 import { OrbitLine } from './render/orbits.js';
 import { LabelLayer } from './render/labels.js';
-import { EclipticGrid, formatUnit } from './render/grid.js';
+import { EclipticGrid } from './render/grid.js';
 import { Belts } from './render/belts.js';
+import { LagrangePoints } from './render/lagrange.js';
 import { createSky } from './render/sky.js';
 import { CameraRig } from './control/cameraRig.js';
 import { attachInput } from './control/input.js';
 import { Hud } from './ui/hud.js';
+import { applyStaticStrings, T } from './i18n.js';
+
+applyStaticStrings(); // 先按浏览器语言把静态文案落位，再建 HUD
 
 const canvas = document.getElementById('view');
 const hud = new Hud();
@@ -63,9 +67,11 @@ const rig = new CameraRig();
 const grid = new EclipticGrid(scene, document.getElementById('gridticks'));
 let labels = null;
 let belts = null;
+let lagrange = null;
 
 let selected = null;
 let orbitOpacity = 1; // 0 = 关闭轨道线
+let timeIndex = TIME_SCALE_DEFAULT_INDEX; // T 键在 TIME_SCALES 里循环
 
 // ───────────────────────────── 每帧用的临时量 ─────────────────────────────
 const camPosKm = new Vector3();
@@ -159,8 +165,8 @@ function frame(now) {
   const dt = Math.min(0.1, (now - lastT) / 1000);
   lastT = now;
 
-  // 时间流逝：真实秒 × TIME_SCALE → 仿真天，所有天体按开普勒根数重新定位并自转
-  system.advance((dt * TIME_SCALE) / 86400);
+  // 时间流逝：真实秒 × 当前倍率 → 仿真天，所有天体按开普勒根数重新定位并自转
+  system.advance((dt * TIME_SCALES[timeIndex]) / 86400);
   rig.update(dt);
   rig.position(camPosKm);
   rig.forward(fwd);
@@ -243,6 +249,7 @@ function frame(now) {
 
   grid.update(sunRel, rig.dist, camPosKm.length(), viewH);
   grid.updateTicks(projectEcliptic, viewW, viewH);
+  lagrange.update(camPosKm, projectEcliptic, focalPx, viewW, viewH);
   belts.update(sunRel, rig.dist, camPosKm.length(), focalPx, system.timeDays);
 
   // 近裁面跟着最近的物体走，远裁面固定覆盖整个已知太阳系
@@ -281,7 +288,8 @@ function frame(now) {
     hud.setMode(rig.mode, rig.focus ?? rig.flight?.body);
     hud.setBody(selected, selected ? selected.screen.dist : 0);
     hud.setGrid(grid.mode, grid.unitKm);
-    hud.setClock(system.date, TIME_SCALE);
+    hud.setLagrange(lagrange.enabled, lagrange.shownCount);
+    hud.setClock(system.date, timeIndex);
   }
 
   renderer.render(scene, camera);
@@ -296,7 +304,7 @@ async function boot() {
 
   // 1) 先把真实纹理拉下来（占进度条前 55%）
   const assets = await preloadBodyTextures(BODIES, (done, all, url) => {
-    hud.progress(0.55 * (done / all), `正在载入纹理 ${url.split('/').pop()}…`);
+    hud.progress(0.55 * (done / all), T.loadTextures(url.split('/').pop()));
   });
 
   // 2) 再建天体视图；没有真实纹理的天体在这一步现场生成程序化表面
@@ -307,13 +315,16 @@ async function boot() {
     views.set(body.id, view);
     if (view.sunViewPos) sunAwareViews.push(view);
     if (body.orbit) orbitLines.push(new OrbitLine(body, scene, system.timeDays));
-    hud.progress(0.55 + 0.45 * ((i + 1) / total), `正在生成 ${body.name} 的表面…`);
+    hud.progress(0.55 + 0.45 * ((i + 1) / total), T.loadSurface(body.name));
     if (i % 2 === 0) await yieldToBrowser();
   }
 
-  hud.progress(1, '正在播撒小行星带与柯伊伯带…');
+  hud.progress(1, T.loadBelts);
   await yieldToBrowser();
   belts = new Belts(scene, renderer.getPixelRatio());
+  lagrange = new LagrangePoints(
+    scene, document.getElementById('lpoints'), system.bodies, renderer.getPixelRatio(),
+  );
 
   labels = new LabelLayer(document.getElementById('labels'), system.bodies);
 
@@ -335,15 +346,19 @@ async function boot() {
         orbitOpacity = orbitOpacity > 0 ? 0 : 1;
       } else if (what === 'labels') {
         labels.setEnabled(!labels.enabled);
+      } else if (what === 'lagrange') {
+        lagrange.setEnabled(!lagrange.enabled);
       } else if (what === 'grid') {
         hud.setGrid(grid.cycle(), grid.unitKm);
-      } else if (what === 'help') {
-        hud.toggleHelp();
+      } else if (what === 'ui') {
+        hud.toggleUi();
+      } else if (what === 'time') {
+        timeIndex = (timeIndex + 1) % TIME_SCALES.length;
       }
     },
   });
 
-  hud.progress(1, '就绪');
+  hud.progress(1, T.loadReady);
   hud.finishLoading();
   selectBody(system.byId.get('earth'));
 
@@ -365,6 +380,8 @@ boot();
 
 // 调参用
 window.HELIOS = {
-  system, rig, views, orbitLines, grid, get belts() { return belts; }, renderer, scene, camera, focusBody,
+  system, rig, views, orbitLines, grid,
+  get belts() { return belts; }, get lagrange() { return lagrange; }, renderer, scene, camera, focusBody,
   get selected() { return selected; },
+  get timeScale() { return TIME_SCALES[timeIndex]; },
 };

@@ -2,3 +2,6 @@ node_modules/
 dist/
 .DS_Store
 *.local
+
+# 构建期生成的纹理派生图（由 scripts/build-textures.mjs 产出）
+.textures/

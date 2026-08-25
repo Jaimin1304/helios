@@ -3,6 +3,7 @@ import {
   RepeatWrapping,
 } from 'three';
 import { OBLIQUITY, SKYBOX_TEXTURE, SKY_BRIGHTNESS } from '../config.js';
+import { resolveTextureUrl } from './assets.js';
 
 /**
  * 星空天球。做成一个跟随相机的反面球而不是 scene.background，是为了
@@ -30,8 +31,9 @@ export function createSky(scene, onLoad) {
   mesh.rotation.x = Math.PI / 2 - OBLIQUITY;
   scene.add(mesh);
 
+  // 天球不走 assets.js 的降采样，但同样要吃构建期的派生图映射
   new TextureLoader().load(
-    SKYBOX_TEXTURE,
+    resolveTextureUrl(SKYBOX_TEXTURE),
     (tex) => {
       tex.colorSpace = SRGBColorSpace;
       // 从球内侧看会左右镜像，翻回来让星图方位正确

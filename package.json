@@ -7,12 +7,14 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "textures": "node scripts/build-textures.mjs",
     "preview": "vite preview"
   },
   "dependencies": {
     "three": "^0.185.1"
   },
   "devDependencies": {
+    "sharp": "^0.35.3",
     "vite": "^8.2.0"
   }
 }

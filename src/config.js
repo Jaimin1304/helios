@@ -35,8 +35,14 @@ export const FOCUS_MIN_DIST_FACTOR = 1.5;
 /** 飞行前这段比例内把镜头转向目标，之后全程锁定目标（0 = 瞬间对准） */
 export const FLIGHT_AIM_LOCK = 0.18;
 
-/** 仿真时间流逝倍率（1440 = 1 真实分钟走完 1 仿真日）。设 0 即冻结时间。 */
-export const TIME_SCALE = 1440;
+/**
+ * 仿真时间流逝倍率的四档，按 T 循环。挑的都是"1 真实分钟"的整倍数，
+ * 读数才有直觉：1×（实时）、1440×（1 分钟 = 1 天）、43200×（= 30 天）、
+ * 525600×（= 365 天）。i18n 里的 timeRates 与本表一一对应。
+ */
+export const TIME_SCALES = [1, 1440, 43200, 525600];
+/** 默认档位的下标（1440×） */
+export const TIME_SCALE_DEFAULT_INDEX = 1;
 
 // ---- 曝光（把 10^6 级的光照动态范围压到可看）----
 // 参考距离 = 关注目标到太阳的距离，曝光 ∝ d^EXPOSURE_EXP。

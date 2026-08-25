@@ -219,12 +219,6 @@ export const BODIES = [
     orbit: au(2.7675, 0.07582, 10.593, 80.393, 73.597, 95.989, 1681.63),
   },
   {
-    id: 'hygiea', name: '健神星', en: 'Hygiea', parent: 'sun', kind: 'minor', radius: 217,
-    rotHours: 13.83, style: 'cratered', craters: 88,
-    palette: ['#282623', '#4a453d', '#676155', '#847d6e'],
-    orbit: au(3.1415, 0.11250, 3.8316, 283.20, 312.32, 152.18, 2031.0),
-  },
-  {
     id: 'pluto', name: '冥王星', en: 'Pluto', parent: 'sun', kind: 'dwarf', radius: 1188.3,
     pole: [132.993, -6.163], rotHours: -153.2928,
     style: 'desert', palette: ['#4a3227', '#8a6249', '#c2a184', '#e6d6bf'],
@@ -240,11 +234,6 @@ export const BODIES = [
     rotHours: 379.2, style: 'icy', cracks: 20,
     palette: ['#8e8a84', '#c4c0b8', '#e6e3dc', '#f6f4ef'],
     orbit: au(67.78, 0.44068, 44.04, 35.951, 151.639, 204.16, 203830.0),
-  },
-  {
-    id: 'dysnomia', name: '阋卫一 · 迪丝诺美亚', en: 'Dysnomia', parent: 'eris', kind: 'moon', radius: 350,
-    style: 'cratered', craters: 55, palette: ['#2e2e31', '#535358', '#74747a', '#93939a'],
-    orbit: { ...km(37273, 0.0062, 0, 0, 0, 130.0, 15.786), frame: 'ecliptic' },
   },
   {
     id: 'haumea', name: '妊神星', en: 'Haumea', parent: 'sun', kind: 'dwarf', radius: 780,
@@ -331,20 +320,15 @@ const ROTATION = {
  * 大天体取实测值；小卫星和 TNO 多为由质量估计换算，仅供量级参考。
  */
 const GM = {
-  sun: 132712440018,
-  mercury: 22031.87, venus: 324858.592, earth: 398600.4418, mars: 42828.375,
-  jupiter: 126686534, saturn: 37931187, uranus: 5793939, neptune: 6836529,
-  moon: 4902.8, phobos: 0.0007112, deimos: 0.0000985,
-  io: 5959.916, europa: 3202.739, ganymede: 9887.834, callisto: 7179.289,
-  amalthea: 0.138, himalia: 0.28,
-  mimas: 2.5026, enceladus: 7.2027, tethys: 41.2097, dione: 73.1146,
-  rhea: 153.9426, titan: 8978.14, hyperion: 0.3727, iapetus: 120.5, phoebe: 0.5532,
-  miranda: 4.4, ariel: 86.4, umbriel: 81.5, titania: 228.2, oberon: 192.4,
-  triton: 1427.6, proteus: 2.5, nereid: 0.36,
-  pluto: 869.6, charon: 105.9, nix: 0.003, hydra: 0.003,
-  ceres: 62.63, vesta: 17.29, pallas: 14.3, hygiea: 5.78,
-  eris: 1108, dysnomia: 1.4, haumea: 267, makemake: 207, quaoar: 93.4,
-  gonggong: 116.8, orcus: 42.4, arrokoth: 0.00005,
+  sun: 132712440018, mercury: 22031.87, venus: 324858.592, earth: 398600.4418,
+  mars: 42828.375, jupiter: 126686534, saturn: 37931187, uranus: 5793939,
+  neptune: 6836529, moon: 4902.8, io: 5959.916, europa: 3202.739,
+  ganymede: 9887.834, callisto: 7179.289, mimas: 2.5026, enceladus: 7.2027,
+  tethys: 41.2097, dione: 73.1146, rhea: 153.9426, titan: 8978.14,
+  iapetus: 120.5, miranda: 4.4, ariel: 86.4, umbriel: 81.5,
+  titania: 228.2, oberon: 192.4, triton: 1427.6, pluto: 869.6,
+  charon: 105.9, ceres: 62.63, eris: 1108, haumea: 267,
+  makemake: 207, quaoar: 93.4, gonggong: 116.8, orcus: 42.4,
 };
 
 for (const b of BODIES) {

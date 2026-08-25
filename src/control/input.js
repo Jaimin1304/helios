@@ -86,9 +86,11 @@ export function attachInput(canvas, rig, hooks) {
     switch (e.key.toLowerCase()) {
       case 'escape': hooks.onRelease(); break;
       case 'o': hooks.onToggle('orbits'); break;
-      case 'l': hooks.onToggle('labels'); break;
+      case 'n': hooks.onToggle('labels'); break;
+      case 'l': hooks.onToggle('lagrange'); break;
       case 'g': hooks.onToggle('grid'); break;
-      case 'h': hooks.onToggle('help'); break;
+      case 't': hooks.onToggle('time'); break;
+      case 'h': hooks.onToggle('ui'); break;
       case 'f': hooks.onFocusSelected(); break;
       default: break;
     }

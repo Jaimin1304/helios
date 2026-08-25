@@ -1,5 +1,6 @@
 import { Vector3, Matrix3 } from 'three';
 import { BODIES, THEME_DEFAULT } from '../data/bodies.js';
+import { bodyName } from '../i18n.js';
 import { compileOrbit, equatorFrame, iauNodeOffset, orbitPosition } from './kepler.js';
 import { DAY_MS, DEG, J2000_MS } from '../config.js';
 
@@ -12,7 +13,7 @@ class Body {
   constructor(def) {
     this.def = def;
     this.id = def.id;
-    this.name = def.name;
+    this.name = bodyName(def); // 随界面语言取中文名或英文名
     this.kind = def.kind;
     this.radius = def.radius;
     this.theme = def.theme ?? THEME_DEFAULT;

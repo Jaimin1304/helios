@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <title>Helios · 真实比例太阳系</title>
+    <title>Helios</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='9' fill='%23ffb347'/></svg>" />
     <link rel="stylesheet" href="./src/style.css" />
   </head>
@@ -14,34 +14,27 @@
     <div id="labels"></div>
     <!-- 黄道面坐标系刻度层 -->
     <div id="gridticks"></div>
+    <!-- 拉格朗日点标签层 -->
+    <div id="lpoints"></div>
 
     <div id="hud">
       <div id="topbar">
-        <div class="brand">HELIOS<span>真实比例太阳系</span></div>
-        <div id="mode-chip" class="chip">自由模式</div>
+        <div class="brand">HELIOS<span data-i18n="brandSub"></span></div>
+        <div id="mode-chip" class="chip"></div>
         <div id="clock-chip" class="chip mono"></div>
         <div id="grid-chip" class="chip hidden"></div>
+        <div id="lagrange-chip" class="chip hidden"></div>
       </div>
 
       <div id="info" class="panel hidden">
         <div class="info-title"><span id="info-name">—</span><span id="info-en"></span></div>
         <dl id="info-rows"></dl>
-        <div class="info-hint">单击 = 选中 · 双击天体或标签 = 飞抵并聚焦</div>
+        <div class="info-hint" data-i18n="infoHint"></div>
       </div>
 
       <div id="help" class="panel">
-        <div class="panel-title">操作 <kbd>H</kbd></div>
-        <dl>
-          <dt>中键拖拽</dt><dd>平移视角（自由模式）</dd>
-          <dt>右键拖拽</dt><dd>绕视口中心与黄道面的交点旋转</dd>
-          <dt>滚轮</dt><dd>缩放（指数级，跨 10 个数量级）</dd>
-          <dt>单击天体/标签</dt><dd>选中，只更新右上角简介</dd>
-          <dt>双击天体/标签</dt><dd>飞抵并进入聚焦模式</dd>
-          <dt>聚焦中·右键</dt><dd>绕天体旋转 · 滚轮拉近拉远</dd>
-          <dt>聚焦中·中键</dt><dd>单击解除聚焦；拖动 = 解除并平移</dd>
-          <dt><kbd>G</kbd></dt><dd>黄道面坐标系：关 → 方格 → 极坐标</dd>
-          <dt><kbd>O</kbd> <kbd>L</kbd> <kbd>Esc</kbd></dt><dd>轨道线 · 标签 · 退出聚焦</dd>
-        </dl>
+        <div class="panel-title"><span data-i18n="helpTitle"></span> <kbd>H</kbd></div>
+        <dl id="help-rows"></dl>
       </div>
     </div>
 
@@ -49,7 +42,7 @@
       <div class="loader-box">
         <div class="loader-title">HELIOS</div>
         <div class="loader-bar"><i id="loader-fill"></i></div>
-        <div class="loader-msg" id="loader-msg">正在生成天体表面…</div>
+        <div class="loader-msg" id="loader-msg">·</div>
       </div>
     </div>
 

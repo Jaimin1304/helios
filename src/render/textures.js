@@ -397,6 +397,34 @@ export function getStarburstTexture() {
   return starburstTexture;
 }
 
+/** 拉格朗日点的标记：空心菱形 + 中心点，和天体的圆形光斑一眼能区分 */
+let markerTexture = null;
+export function getMarkerTexture() {
+  if (markerTexture) return markerTexture;
+  const N = 64;
+  const c = N / 2;
+  const canvas = makeCanvas(N, N);
+  const ctx = canvas.getContext('2d');
+  // 纯白，颜色由逐顶点属性决定，这里只提供 alpha 形状
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth = 4;
+  ctx.lineJoin = 'round';
+  ctx.beginPath();
+  ctx.moveTo(c, 7);
+  ctx.lineTo(N - 7, c);
+  ctx.lineTo(c, N - 7);
+  ctx.lineTo(7, c);
+  ctx.closePath();
+  ctx.stroke();
+  ctx.fillStyle = '#fff';
+  ctx.beginPath();
+  ctx.arc(c, c, 3.2, 0, Math.PI * 2);
+  ctx.fill();
+
+  markerTexture = new CanvasTexture(canvas);
+  return markerTexture;
+}
+
 /** 光点/光晕用的径向渐变精灵贴图（全场景共用一张） */
 let glowTexture = null;
 export function getGlowTexture() {

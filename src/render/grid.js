@@ -2,6 +2,7 @@ import {
   BufferGeometry, Float32BufferAttribute, LineBasicMaterial, LineSegments, Color, Group,
 } from 'three';
 import { AU_KM, KM_TO_UNITS, FOV, DEG } from '../config.js';
+import { T } from '../i18n.js';
 
 /**
  * 以太阳为原点的黄道面坐标系（黄道面就是场景的 z = 0 平面）。
@@ -97,8 +98,8 @@ export function formatUnit(km) {
     const au = km / AU_KM;
     return `${au >= 1 ? au.toFixed(au < 10 ? 1 : 0) : au.toFixed(3)} AU`;
   }
-  if (km >= 1e6) return `${(km / 1e6).toFixed(0)} 百万 km`;
-  if (km >= 1000) return `${(km / 1000).toFixed(0)} 千 km`;
+  if (km >= 1e6) return T.millionKm((km / 1e6).toFixed(0));
+  if (km >= 1000) return T.thousandKm((km / 1000).toFixed(0));
   return `${km.toFixed(0)} km`;
 }
 

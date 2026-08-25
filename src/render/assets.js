@@ -7,13 +7,28 @@ import { TEXTURE_MAX_WIDTH } from '../config.js';
  * 素材里不少是 8192×4096 的 jpg，解码后每张要 8192*4096*4 ≈ 134 MB 显存，
  * 十来张就上 GB 了。所以统一在**解码阶段**降采样到 TEXTURE_MAX_WIDTH
  * （createImageBitmap 的 resizeWidth 是离线程做的，比 <img>+canvas 快很多）。
- * 想要更高清就调大 config.js 里那个常量。
+ * 想要更高清就调大 config.js 里那个常量，然后重跑 scripts/build-textures.mjs。
  */
+
+/* global __TEX_MAP__ */
+/**
+ * 构建期生成的「原始文件名 → 派生文件名」映射（见 vite.config.js）。
+ * 生产构建里纹理已经被缩到 TEXTURE_MAX_WIDTH 并转成 webp，文件名跟着变；
+ * 开发时这张表是空的，直接用 solar_textures/ 下的原图。
+ */
+const TEX_MAP = __TEX_MAP__;
+
+/** 只在真正发请求前替换，缓存键仍用 bodies.js 里写的原始 url */
+export function resolveTextureUrl(url) {
+  const i = url.lastIndexOf('/');
+  const mapped = TEX_MAP[url.slice(i + 1)];
+  return mapped ? url.slice(0, i + 1) + mapped : url;
+}
 
 const cache = new Map();
 
 async function decodeScaled(url, maxWidth) {
-  const res = await fetch(url);
+  const res = await fetch(resolveTextureUrl(url));
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const blob = await res.blob();
 
@@ -47,7 +62,7 @@ export async function loadTexture(url, colorSpace = 'srgb', maxWidth = TEXTURE_M
     } catch (err) {
       // createImageBitmap 不可用 / 取不到 blob 时退回原始尺寸加载
       console.warn(`[helios] ${url} 降采样加载失败，退回原始尺寸`, err);
-      tex = await new TextureLoader().loadAsync(url);
+      tex = await new TextureLoader().loadAsync(resolveTextureUrl(url));
     }
     tex.colorSpace = colorSpace === 'srgb' ? SRGBColorSpace : LinearSRGBColorSpace;
     tex.anisotropy = 8;
