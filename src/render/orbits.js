@@ -7,10 +7,11 @@ import {
 import { smoothstep } from './noise.js';
 
 /**
- * 轨道线。几何体以**天体当前位置**为原点、并把采样相位对齐到天体，
- * 每帧只把整条线平移到天体的相机相对位置上。
- * 这样轨道线一定精确穿过天体，远处也不会因为 float32 而抖动。
- * （天体运动起来后调 rebuild() 重采样即可。）
+ * Orbit line. The geometry is built with the body's current position as its origin and its
+ * sampling phase aligned to the body, so each frame only translates the whole line to the
+ * body's camera-relative position. That keeps the line passing exactly through the body and
+ * stops float32 jitter at large distances.
+ * Once bodies start moving, call rebuild() to resample.
  */
 export class OrbitLine {
   constructor(body, scene, timeDays = 0) {
@@ -38,7 +39,7 @@ export class OrbitLine {
     this.rebuild(timeDays);
   }
 
-  /** 按当前时刻重新采样（相位锚定在天体上） */
+  /** Resample for the current instant, with the phase anchored to the body */
   rebuild(timeDays) {
     const E0 = eccentricAnomalyAt(this.body.orbit, timeDays);
     const pts = sampleOrbit(this.body.orbit, ORBIT_SEGMENTS, E0, this.body.local);
@@ -49,9 +50,9 @@ export class OrbitLine {
   }
 
   /**
-   * @param {import('three').Vector3} bodyRel 天体相对相机的位置（场景单位）
-   * @param {number} pxPerUnit  母天体所在距离上 1 场景单位 = 多少像素
-   * @param {number} globalOpacity 总开关（0 = 关闭轨道线）
+   * @param {import('three').Vector3} bodyRel body position relative to the camera (scene units)
+   * @param {number} pxPerUnit  pixels per scene unit at the primary's distance
+   * @param {number} globalOpacity master switch (0 turns orbit lines off)
    */
   update(bodyRel, pxPerUnit, globalOpacity, timeDays) {
     if (globalOpacity <= 0) {
@@ -65,7 +66,8 @@ export class OrbitLine {
     this.material.opacity = a * ORBIT_OPACITY * globalOpacity;
     this.line.visible = this.material.opacity > 0.004;
 
-    // 天体沿轨道走了超过半段，锚点就该重打了（只对当前可见的轨道做，很便宜）
+    // Once the body has travelled more than half a segment the anchor needs redoing.
+    // Only visible orbits are checked, which makes this cheap.
     if (this.line.visible) {
       const E = eccentricAnomalyAt(this.body.orbit, timeDays);
       const drift = Math.atan2(Math.sin(E - this.builtE), Math.cos(E - this.builtE));

@@ -1,6 +1,7 @@
 /**
- * 鼠标 / 键盘绑定。刻意做成 Blender 风格：
- *   中键 = 平移，右键 = 旋转，滚轮 = 缩放，双击 = 飞抵聚焦，聚焦中点中键 = 退出。
+ * Mouse and keyboard bindings, deliberately shaped like Blender's: middle button pans,
+ * right button orbits, wheel zooms, double-click flies to a body, and a middle click
+ * while focused releases it.
  */
 export function attachInput(canvas, rig, hooks) {
   const drag = { button: -1, x: 0, y: 0, moved: 0 };
@@ -15,14 +16,15 @@ export function attachInput(canvas, rig, hooks) {
 
   canvas.addEventListener('pointerdown', (e) => {
     if (e.button !== 0 && e.button !== 1 && e.button !== 2) return;
-    if (e.button === 1) e.preventDefault(); // 屏蔽 Windows 中键自动滚动
+    if (e.button === 1) e.preventDefault(); // suppress Windows middle-click autoscroll
     canvas.setPointerCapture(e.pointerId);
     drag.button = e.button;
     drag.x = e.clientX;
     drag.y = e.clientY;
     drag.moved = 0;
 
-    // 右键按下的瞬间决定转轴：视口中心射线与黄道面的交点
+    // The instant the right button goes down, fix the pivot at the intersection of the
+    // view-centre ray with the ecliptic plane
     if (e.button === 2 && rig.mode === 'free') rig.snapPivotToEcliptic();
     if (e.button !== 0) canvas.classList.add('grabbing');
   });
@@ -39,7 +41,7 @@ export function attachInput(canvas, rig, hooks) {
     drag.moved += Math.abs(dx) + Math.abs(dy);
 
     if (drag.button === 1) {
-      // 中键拖拽：聚焦中（或正在飞行）就先立刻解除，然后当场接着平移
+      // Middle drag: if focused or in flight, release at once and carry straight on panning
       if (rig.mode !== 'free') hooks.onRelease();
       rig.pan(dx, dy, canvas.clientHeight);
     } else if (drag.button === 2) {
@@ -56,9 +58,9 @@ export function attachInput(canvas, rig, hooks) {
     canvas.classList.remove('grabbing');
     if (canvas.hasPointerCapture?.(e.pointerId)) canvas.releasePointerCapture(e.pointerId);
 
-    if (moved > 5) return; // 拖拽，不算点击
+    if (moved > 5) return; // a drag, not a click
     if (btn === 1) {
-      // 中键单击：解除聚焦
+      // Middle click releases focus
       if (rig.mode !== 'free') hooks.onRelease();
     } else if (btn === 0) {
       hooks.onSelect(hooks.pick(e.clientX, e.clientY));
@@ -76,8 +78,8 @@ export function attachInput(canvas, rig, hooks) {
     e.preventDefault();
     if (rig.busy) return;
     let d = e.deltaY;
-    if (e.deltaMode === 1) d *= 16; // 行
-    else if (e.deltaMode === 2) d *= 100; // 页
+    if (e.deltaMode === 1) d *= 16; // lines
+    else if (e.deltaMode === 2) d *= 100; // pages
     rig.zoom(Math.max(-260, Math.min(260, d)));
   }, { passive: false });
 

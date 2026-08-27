@@ -1,4 +1,4 @@
-// 轻量程序化噪声工具（临时表面材质用，后续会被真实纹理取代）
+// Lightweight procedural noise helpers used by the placeholder surface materials.
 
 function hash3(i, j, k) {
   let h = Math.imul(i, 374761393) ^ Math.imul(j, 668265263) ^ Math.imul(k, 1274126177);
@@ -8,7 +8,7 @@ function hash3(i, j, k) {
 
 const smoother = (t) => t * t * t * (t * (t * 6 - 15) + 10);
 
-/** 3D 值噪声，返回 [0,1)。在球面方向上采样即可天然无缝。 */
+/** 3D value noise in [0,1). Sampling it along sphere directions is seamless by construction. */
 export function noise3(x, y, z) {
   const xi = Math.floor(x), yi = Math.floor(y), zi = Math.floor(z);
   const xf = smoother(x - xi), yf = smoother(y - yi), zf = smoother(z - zi);
@@ -27,7 +27,7 @@ export function noise3(x, y, z) {
   return y0 + (y1 - y0) * zf;
 }
 
-/** 分形叠加，返回 [0,1] */
+/** Fractal sum, returns [0,1] */
 export function fbm(x, y, z, octaves = 5, lacunarity = 2.07, gain = 0.5) {
   let sum = 0, amp = 1, norm = 0, f = 1;
   for (let o = 0; o < octaves; o++) {
@@ -39,7 +39,7 @@ export function fbm(x, y, z, octaves = 5, lacunarity = 2.07, gain = 0.5) {
   return sum / norm;
 }
 
-/** 脊状噪声，适合做山脉/裂纹感 */
+/** Ridged noise, good for mountain ranges and crack patterns */
 export function ridged(x, y, z, octaves = 4, lacunarity = 2.13, gain = 0.5) {
   let sum = 0, amp = 1, norm = 0, f = 1;
   for (let o = 0; o < octaves; o++) {
@@ -57,8 +57,8 @@ export function hexToRgb(hex) {
 }
 
 /**
- * 把调色板编译成 256 级查找表，采样时只需一次索引。
- * @param {string[]} palette 由暗到亮的若干 hex 颜色
+ * Compile a palette into a 256-entry lookup table so sampling costs one index.
+ * @param {string[]} palette hex colours ordered dark to bright
  */
 export function makeRamp(palette) {
   const stops = palette.map(hexToRgb);
@@ -82,7 +82,7 @@ export function smoothstep(a, b, x) {
   return t * t * (3 - 2 * t);
 }
 
-/** 稳定的伪随机序列（同一 seed 每次生成相同表面） */
+/** Stable pseudo-random sequence: the same seed always regenerates the same surface */
 export function rng(seed) {
   let s = seed >>> 0 || 1;
   return () => {

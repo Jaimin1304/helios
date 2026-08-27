@@ -24,7 +24,7 @@ function fmtPeriod(days) {
   return T.years((d / 365.25).toFixed(d / 365.25 < 100 ? 2 : 0));
 }
 
-/** 自转周期：小于两天的用小时更直观，另标注逆行 / 同步自转 */
+/** Rotation period: hours read better below two days. Retrograde and synchronous get tagged. */
 function fmtSpin(body) {
   const d = body.rotationDays;
   if (!d) return T.none;
@@ -71,7 +71,7 @@ export class Hud {
     setTimeout(() => this.loading.remove(), 700);
   }
 
-  /** H：收起 / 展开全部界面，只留左上角的 HELIOS 标志 */
+  /** H: collapse or restore the whole interface, leaving only the HELIOS mark */
   toggleUi() {
     this.uiHidden = !this.uiHidden;
     this.root.classList.toggle('ui-hidden', this.uiHidden);
@@ -89,8 +89,8 @@ export class Hud {
   }
 
   /**
-   * 仿真时钟（UTC）与时间流逝倍率。倍率后面跟一句这一档的含义——
-   * 光看 43200× / 525600× 根本读不出快慢。
+   * Simulation clock (UTC) and time-lapse rate. The rate is followed by what it means,
+   * because 43200x and 525600x say nothing about speed on their own.
    */
   setClock(date, index) {
     const p = (n) => String(n).padStart(2, '0');
@@ -103,7 +103,8 @@ export class Hud {
     }
   }
 
-  /** 拉格朗日点：顺带报出当前有几组在显示——拉远时会全部隐藏，不然会以为功能坏了 */
+  /** Lagrange points. The number of visible groups is reported too, because zooming out
+   *  hides every group and without the count that looks like a broken feature. */
   setLagrange(on, count) {
     const text = on ? T.lagrangeChip(count) : null;
     if (this._lagrange === text) return;
@@ -112,7 +113,7 @@ export class Hud {
     if (on) this.lagrangeChip.textContent = text;
   }
 
-  /** 黄道面坐标系：显示当前模式和格距 */
+  /** Ecliptic frame: current mode and cell size */
   setGrid(mode, unitKm) {
     if (mode === 'off') {
       this.gridChip.classList.add('hidden');
@@ -138,7 +139,8 @@ export class Hud {
       this._body = body;
       this.infoName.textContent = body.name;
       this.infoName.style.color = body.theme;
-      // 中文界面下副标题给出英文名；英文界面下正标题已经是英文，副标题留空
+      // In Chinese the subtitle carries the English name. In English the title already is
+      // the English name, so the subtitle stays empty.
       this.infoEn.textContent = LANG === 'zh' ? body.def.en : '';
     }
     const rows = [

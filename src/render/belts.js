@@ -5,36 +5,40 @@ import { AU_KM, DEG, KM_TO_UNITS } from '../config.js';
 import { rng, seedOf, smoothstep } from './noise.js';
 
 /**
- * 小行星带与柯伊伯带。
+ * Asteroid belt and Kuiper belt.
  *
- * 每个粒子都带着自己的一套真实轨道根数，**开普勒方程在顶点着色器里解**，
- * 所以它们是货真价实地在绕日公转（各自周期不同 → 会自然形成较差转动），
- * 而不是一张贴图或一个整体旋转的圆环。代价只有 2 个 draw call。
+ * Every particle carries its own set of real orbital elements and SOLVES KEPLER'S EQUATION IN
+ * THE VERTEX SHADER, so these genuinely orbit the Sun. Periods differ from particle to particle,
+ * which produces differential rotation on its own rather than the uniform spin of a textured
+ * ring. The whole thing costs two draw calls.
  *
- * 尺寸上真实的小行星在任何视距下都远小于一个像素，所以画成恒定 1 设备像素的
- * 光点（关掉尺寸衰减）——这既是最省的画法，也是物理上最诚实的画法。
+ * A real asteroid is far below one pixel at any viewing distance, so each is drawn as a dot of
+ * exactly one device pixel with size attenuation off. That is both the cheapest option and the
+ * physically honest one.
  *
- * 不可交互：它们不是 Body，不参与拾取，也没有标签。
+ * These are not interactive: they are not Body instances, take no part in picking, and carry
+ * no labels.
  */
 
 /**
- * 点的尺寸必须取**整数设备像素**。
+ * Point size has to be a WHOLE NUMBER of device pixels.
  *
- * GL 对 point 的光栅化规则是：以点位置为中心、边长 gl_PointSize 的正方形，
- * 覆盖到哪些像素的**中心**就生成哪些片元。所以边长取 1.6 时，正方形会随
- * 亚像素位置的漂移覆盖到 1、2 或 4 个像素中心——同一颗小行星的亮度会随它
- * 移动在 1~4 倍之间跳，这是走样闪烁，不是"闪烁的星星"。
- * 整数边长则恒定覆盖 n² 个像素，亮度稳定；1 是理论最小值，也最像真实的星点。
+ * GL rasterises a point as a square of side gl_PointSize centred on the point, generating a
+ * fragment for every pixel whose CENTRE the square covers. At a side of 1.6 that square covers
+ * one, two or four pixel centres depending on where the sub-pixel position happens to fall, so
+ * a single asteroid's brightness jumps by up to 4x as it moves. That is aliasing rather than
+ * twinkling. A whole-number side always covers n^2 pixels and stays steady, and 1 is both the
+ * theoretical minimum and the closest match to a real point source.
  *
- * 之所以不直接写死 1.0：gl_PointSize 的单位是**设备像素**，在 2 倍屏上
- * 1 设备像素只有半个 CSS 像素，整条带会明显变稀。取 round(dpr) 既保持整数，
- * 又让不同像素密度的屏幕看到差不多的观感。
+ * The reason it is not hard-coded to 1.0 is that gl_PointSize counts DEVICE pixels: on a 2x
+ * display one device pixel is half a CSS pixel and the whole belt visibly thins out. Using
+ * round(dpr) keeps the value whole while matching the look across pixel densities.
  */
 const pointSize = (dpr) => Math.max(1, Math.round(dpr));
-/** 带的屏幕半径达到该像素数时取满不透明度，更小则按面积比衰减 */
+/** At this on-screen belt radius opacity is full; below it, brightness scales by area ratio */
 const REF_SPAN_PX = 420;
 
-/** 柯克伍德空隙：与木星的平均运动共振扫空的位置 [中心AU, 宽度, 深度] */
+/** Kirkwood gaps, swept clear by mean-motion resonances with Jupiter: [centre AU, width, depth] */
 const KIRKWOOD = [
   [2.065, 0.012, 0.85], // 4:1
   [2.502, 0.020, 0.92], // 3:1
@@ -46,11 +50,11 @@ const KIRKWOOD = [
 const BELTS = {
   main: {
     count: 60000,
-    color: '#cfc3ad', // 小行星以碳质/硅酸盐为主，偏暖灰
-    brightness: 1.05, // 1.6px 时期望覆盖 2.56 个片元，改 1px 后按比例补回
+    color: '#cfc3ad', // asteroids are mostly carbonaceous or silicate, so a warm grey
+    brightness: 1.05, // compensates for the coverage lost moving from 1.6 px to 1 px
     aRange: [2.00, 3.35],
     meanAU: 2.75,
-    /** 主带的径向数密度（含空隙），用于拒绝采样 */
+    /** Radial number density of the main belt including gaps, used for rejection sampling */
     density(a) {
       let d = smoothstep(2.05, 2.35, a) * (1 - smoothstep(3.05, 3.30, a));
       d *= 0.55 + 0.45 * Math.exp(-((a - 2.85) ** 2) / 0.24);
@@ -59,7 +63,7 @@ const BELTS = {
       }
       return d;
     },
-    /** 偏心率与倾角：主带实测平均 e≈0.14、i≈10° */
+    /** Eccentricity and inclination; the main belt averages e around 0.14 and i around 10 degrees */
     shape(rand) {
       return {
         e: Math.min(0.34, 0.02 + Math.sqrt(-2 * Math.log(1 - rand() * 0.999)) * 0.085),
@@ -69,14 +73,14 @@ const BELTS = {
   },
   kuiper: {
     count: 45000,
-    color: '#c9a89a', // KBO 表面偏红
+    color: '#c9a89a', // KBO surfaces run red
     brightness: 1.25,
     meanAU: 43,
-    /** 柯伊伯带不是均匀圆环，按三个真实子群混合采样 */
+    /** The Kuiper belt is far from a uniform ring, so it is sampled as a mix of three real populations */
     sample(rand) {
       const r = rand();
       if (r < 0.25) {
-        // 冥族小天体：与海王星 3:2 共振，聚集在 39.4 AU，偏心率和倾角都更大
+        // Plutinos: in 3:2 resonance with Neptune, clustered at 39.4 AU with higher e and i
         return {
           a: 39.45 + (rand() - 0.5) * 0.7,
           e: 0.10 + rand() * 0.22,
@@ -84,14 +88,14 @@ const BELTS = {
         };
       }
       if (r < 0.85) {
-        // 冷经典带：42~47.5 AU，轨道近圆、几乎共面，外缘就是"柯伊伯断崖"
+        // Cold classical belt: 42 to 47.5 AU, near-circular and nearly coplanar, ending at the Kuiper cliff
         return {
           a: 42.0 + rand() * 5.5,
           e: rand() * 0.09,
           inc: Math.sqrt(-2 * Math.log(1 - rand() * 0.999)) * 2.2 * DEG,
         };
       }
-      // 热经典带：分布更宽、倾角更高
+      // Hot classical belt: wider spread and higher inclinations
       return {
         a: 40.0 + rand() * 8.0,
         e: 0.04 + rand() * 0.20,
@@ -102,23 +106,25 @@ const BELTS = {
 };
 
 const VERT = /* glsl */`
-  attribute vec3 aP;      // 近日点方向基
-  attribute vec3 aQ;      // 轨道面内的正交基
-  attribute vec2 aPhase;  // x = 历元平近点角, y = 亮度
-  uniform float uTime;    // J2000 起的天数
-  uniform float uSize;    // 点的尺寸，整数设备像素
+  attribute vec3 aP;      // basis vector towards perihelion
+  attribute vec3 aQ;      // orthogonal basis vector in the orbital plane
+  attribute vec2 aPhase;  // x = mean anomaly at epoch, y = brightness
+  uniform float uTime;    // days since J2000
+  uniform float uSize;    // point size, in whole device pixels
   varying float vShade;
 
   #include <common>
   #include <logdepthbuf_pars_vertex>
 
   void main() {
-    // position 借用来存轨道量：x = 半长径(场景单位), y = 偏心率, z = 平均角速度(rad/day)
+    // position is repurposed to carry orbital quantities:
+    // x = semi-major axis (scene units), y = eccentricity, z = mean motion (rad/day)
     float a = position.x;
     float e = position.y;
     float M = aPhase.x + position.z * uTime;
 
-    // 解开普勒方程 M = E - e·sinE。e < 0.35，牛顿迭代 3 次足够收敛到像素以下。
+    // Solve Kepler's equation M = E - e*sinE. With e < 0.35, three Newton steps converge to
+    // well under a pixel.
     float E = M + e * sin(M);
     for (int k = 0; k < 3; k++) {
       E -= (E - e * sin(E) - M) / (1.0 - e * cos(E));
@@ -156,7 +162,7 @@ function buildGeometry(spec, seed) {
   const qv = new Float32Array(n * 3);
   const phase = new Float32Array(n * 2);
 
-  // 拒绝采样用的密度上界
+  // Density ceiling for rejection sampling
   let peak = 0;
   if (spec.density) {
     for (let k = 0; k <= 200; k++) {
@@ -191,11 +197,12 @@ function buildGeometry(spec, seed) {
 
     orbit[i * 3] = aAU * AU_KM * KM_TO_UNITS;
     orbit[i * 3 + 1] = e;
-    // 平均角速度：高斯引力常数形式 n = k·a^-1.5（rad/day，a 以 AU 计）
+    // Mean motion in Gaussian gravitational constant form, n = k * a^-1.5 (rad/day, a in AU)
     orbit[i * 3 + 2] = 0.01720209895 / (aAU * Math.sqrt(aAU));
 
     phase[i * 2] = rand() * Math.PI * 2;
-    // 亮度取幂律：绝大多数很暗，少数亮，观感上才有"颗粒感"而不是一片糊
+    // A power-law brightness distribution keeps most particles faint and a few bright, which is
+    // what gives the belt grain instead of an even smear
     phase[i * 2 + 1] = 0.15 + rand() ** 2.6 * 0.85;
   }
 
@@ -222,33 +229,34 @@ class Belt {
       transparent: true,
       blending: AdditiveBlending,
       depthWrite: false,
-      depthTest: true, // 行星要能挡住它们
+      depthTest: true, // planets have to be able to hide them
       toneMapped: false,
     });
     this.points = new Points(buildGeometry(spec, seed), this.material);
     this.points.frustumCulled = false;
-    this.points.renderOrder = -2; // 在轨道线之前画
+    this.points.renderOrder = -2; // drawn before the orbit lines
     scene.add(this.points);
   }
 
   /**
-   * @param {Vector3} sunRel 太阳相对相机的位置（场景单位）
-   * @param {number} viewScaleKm 当前视野尺度（相机到枢轴的距离，km）
-   * @param {number} sunDistKm 相机到太阳的距离，km
-   * @param {number} focalPx 像素焦距
-   * @param {number} timeDays 仿真时刻
+   * @param {Vector3} sunRel Sun position relative to the camera (scene units)
+   * @param {number} viewScaleKm current view scale, the camera-to-pivot distance in km
+   * @param {number} sunDistKm camera-to-Sun distance in km
+   * @param {number} focalPx focal length in pixels
+   * @param {number} timeDays simulation instant
    */
   update(sunRel, viewScaleKm, sunDistKm, focalPx, timeDays) {
     this.points.position.copy(sunRel);
     this.material.uniforms.uTime.value = timeDays;
 
     const meanKm = this.spec.meanAU * AU_KM;
-    // ① 镜头尺度远小于带本身时淡出：贴着行星看的时候真实小行星根本不可见，
-    //    满屏乱撒光点只会变成噪点。
+    // 1) Fade out once the view scale drops far below the belt itself. Standing beside a planet,
+    //    real asteroids would be invisible, and a screenful of scattered dots is just noise.
     const near = smoothstep(0.02 * meanKm, 0.15 * meanKm, viewScaleKm);
-    // ② 按屏幕面积归一化：点是恒定像素尺寸的，带被压小时总光通量不变、
-    //    单位面积亮度却 ∝ 1/面积，加法混合下会糊成一坨白斑。乘上面积比即可
-    //    让"远看是一圈淡淡的环"，而不是一个过曝的团。
+    // 2) Normalise by screen area. The dots hold a constant pixel size, so as the belt shrinks the
+    //    total flux stays put while brightness per unit area rises as 1/area, and additive blending
+    //    turns it into an overexposed blob. Multiplying by the area ratio restores the faint ring
+    //    it should read as from far away.
     const beltPx = (meanKm / Math.max(sunDistKm, 1)) * focalPx;
     const spread = Math.min(1, (beltPx / REF_SPAN_PX) ** 2);
 

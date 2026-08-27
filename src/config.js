@@ -1,75 +1,80 @@
-// 全局常量与可调参数。
-// 约定：**所有物理量一律用 km / 天 / 弧度做双精度计算**，只有在写进 three.js
-// 对象时才乘 KM_TO_UNITS 转成场景单位。
+// Global constants and tuning knobs.
+// Everything physical is computed in double precision using km, days and radians;
+// values are multiplied by KM_TO_UNITS only when they are handed to three.js.
 
 export const DEG = Math.PI / 180;
 export const AU_KM = 149597870.7;
 export const DAY_MS = 86400000;
 
-/** J2000.0 = 2000-01-01 12:00 TT，本工程用作所有轨道根数的历元 */
+/** J2000.0 = 2000-01-01 12:00 TT, the epoch for every orbital element here */
 export const J2000_MS = Date.UTC(2000, 0, 1, 12, 0, 0);
 
-/** 黄赤交角（J2000），用于把 IAU 极点(赤道系 RA/Dec)转到黄道系 */
+/** Obliquity of the ecliptic (J2000), used to rotate IAU poles from equatorial RA/Dec into ecliptic coordinates */
 export const OBLIQUITY = 23.4392911 * DEG;
 
-/** 场景单位：1 unit = 1000 km。数值本身不影响精度（渲染是相机相对的），
- *  只是让 near/far 之类的量级好读一些。 */
+/** Scene unit: 1 unit = 1000 km. The choice does not affect precision, since rendering
+ *  is camera-relative; it just keeps near/far values in a readable range. */
 export const KM_TO_UNITS = 1e-3;
 export const UNITS_TO_KM = 1e3;
 export const AU_UNITS = AU_KM * KM_TO_UNITS;
 
-// ---- 相机 ----
+// ---- Camera ----
 export const FOV = 50;
 export const MIN_NEAR_UNITS = 2e-7; // 0.2 m
 export const FAR_UNITS = 4e8; // 4e11 km ≈ 2700 AU
-/** 近裁面上限。近裁面本来随最近物体走，但视角拉到最远时它会涨到 1e7 单位，
- *  把跟随它缩放的天球壳顶出远裁面之外 → 星空整个变黑。对数深度缓冲下
- *  近裁面取小一点没有任何代价，所以直接封顶。 */
+/** Ceiling on the near plane. It normally tracks the closest object, but at maximum
+ *  zoom-out it climbs to ~1e7 units and pushes the sky shell, which scales with it,
+ *  past the far plane and blanks the starfield. A logarithmic depth buffer makes a
+ *  small near plane free, so capping it costs nothing. */
 export const MAX_NEAR_UNITS = 2e4;
 
-// 自由模式的缩放范围（相机到枢轴的距离，km）
+// Zoom range in free mode (camera-to-pivot distance, km)
 export const FREE_DIST_MIN = 20;
 export const FREE_DIST_MAX = 4e10;
-/** 聚焦模式下相机到天体中心的最小距离 = 半径 × 该系数 */
+/** Minimum camera-to-centre distance in focus mode = body radius times this factor */
 export const FOCUS_MIN_DIST_FACTOR = 1.5;
-/** 飞行前这段比例内把镜头转向目标，之后全程锁定目标（0 = 瞬间对准） */
+/** Fraction of the flight spent turning towards the target; afterwards the camera stays locked on it (0 aims instantly) */
 export const FLIGHT_AIM_LOCK = 0.18;
 
 /**
- * 仿真时间流逝倍率的四档，按 T 循环。挑的都是"1 真实分钟"的整倍数，
- * 读数才有直觉：1×（实时）、1440×（1 分钟 = 1 天）、43200×（= 30 天）、
- * 525600×（= 365 天）。i18n 里的 timeRates 与本表一一对应。
+ * The four time-lapse rates cycled by T. Each one is a whole multiple of a real minute
+ * so the readings stay intuitive: 1x (real time), 1440x (one minute per simulated day),
+ * 43200x (30 days) and 525600x (365 days). The timeRates array in i18n.js matches
+ * this table entry for entry.
  */
 export const TIME_SCALES = [1, 1440, 43200, 525600];
-/** 默认档位的下标（1440×） */
+/** Index of the default rate (1440x) */
 export const TIME_SCALE_DEFAULT_INDEX = 1;
 
-// ---- 曝光（把 10^6 级的光照动态范围压到可看）----
-// 参考距离 = 关注目标到太阳的距离，曝光 ∝ d^EXPOSURE_EXP。
-// 光照本身 ∝ d^-2，所以画面亮度 ∝ d^(EXP-2)：
-//   EXP = 2 → 各处一样亮，完全失去距离感；EXP = 0 → 海王星比地球暗 900 倍。
-// 取 1.88 → 海王星约为地球的 0.67、阋神星 0.58，既能看清又保留衰减感；
-// 同时近日天体的曝光被压低（水星仅比地球亮 12%），不会过曝。
+// ---- Exposure: compressing a 10^6 lighting range into something viewable ----
+// The reference distance runs from the object of interest to the Sun, and exposure
+// scales as d^EXPOSURE_EXP. Illumination itself falls off as d^-2, so screen brightness
+// ends up proportional to d^(EXP-2). An exponent of 2 makes everything equally bright
+// and destroys any sense of distance, while 0 leaves Neptune 900 times darker than Earth.
+// At 1.88 Neptune lands around 0.67 of Earth and Eris around 0.58, readable but still
+// visibly dimmer, and the same curve holds Mercury to 12% brighter than Earth.
 export const EXPOSURE_EXP = 1.88;
 export const EXPOSURE_MIN = 0.15;
 export const EXPOSURE_MAX = 1400;
 export const EXPOSURE_REF_MIN_AU = 0.3;
 export const EXPOSURE_REF_MAX_AU = 45;
-export const SKY_BRIGHTNESS = 0.3; // 星空亮度（toneMapped:false，不受曝光影响）
+export const SKY_BRIGHTNESS = 0.3; // Starfield brightness (toneMapped:false, so exposure never touches it)
 export const AMBIENT = 0.02;
 
-// ---- 可见性 / 标签 ----
-/** 天体视半径小于该像素数时，用恒定屏幕尺寸的光点代替（并淡出球体） */
+// ---- Visibility and labels ----
+/** Below this apparent radius a body is replaced by a fixed-screen-size dot and the sphere fades out */
 export const DOT_TAKEOVER_PX = 4.0;
 export const DOT_FULL_PX = 1.0;
-// 恒星那一档是星芒贴图的最小屏幕尺寸：芒占贴图外围大半，画布太小就读不出"刺眼"
+// The star entry is the minimum screen size for the starburst sprite. Its spikes occupy most
+// of the texture, and any smaller they stop reading as glare.
 export const DOT_SIZE_PX = { star: 84, planet: 9, dwarf: 7, moon: 6, minor: 6 };
-export const LABEL_MIN_SEP_PX = 9; // 卫星与母天体的最小屏幕间距，太近就不画标签
+export const LABEL_MIN_SEP_PX = 9; // A moon closer than this to its primary on screen gets no label
 
-// ---- 轨道线 ----
+// ---- Orbit lines ----
 export const ORBIT_SEGMENTS = 512;
-// 轨道线只在"镜头大致处于该轨道的尺度上"时显示：太小看不清，
-// 太大就只是几条横穿视野的直线（比如贴着地球时的海王星轨道），纯属干扰。
+// An orbit line is drawn only while the camera sits roughly at that orbit's scale. Any smaller
+// and it is illegible; any larger and it degenerates into a few straight lines crossing the
+// view, such as Neptune's orbit seen from beside Earth, which is pure clutter.
 export const ORBIT_FADE_IN_PX = 14;
 export const ORBIT_FADE_FULL_PX = 45;
 export const ORBIT_FADE_OUT_PX = 1400;
@@ -78,6 +83,6 @@ export const ORBIT_OPACITY = 0.34;
 
 export const SKYBOX_TEXTURE = './solar_textures/8k_stars_milky_way.jpg';
 
-/** 真实纹理的最长边上限（像素）。见 render/assets.js 里的显存账。
- *  显存充裕想更高清，调到 4096 或 8192 即可。 */
+/** Longest-edge cap for real textures, in pixels. See the VRAM arithmetic in render/assets.js.
+ *  Raise it to 4096 or 8192 for sharper surfaces if VRAM allows, then re-run npm run textures. */
 export const TEXTURE_MAX_WIDTH = 2048;

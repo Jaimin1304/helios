@@ -9,32 +9,52 @@ import {
 } from './textures.js';
 import { pickTexture } from './assets.js';
 import { smoothstep } from './noise.js';
+import { BODY_BY_ID } from '../data/bodies.js';
 
-/** 环的等效反照率（含后向散射的经验值），配合平方反比给出最终亮度 */
+const SUN_RADIUS_KM = BODY_BY_ID.get('sun').radius;
+
+/** Effective ring albedo, an empirical figure that folds in backscatter; combined with the
+ *  inverse-square falloff it gives the final brightness */
 const RING_ALBEDO = 0.45;
-/** 夜面灯光强度。真实城市灯光比日照弱好几个数量级，这里只取"看得见但明显更暗" */
+/** Cosine of the viewing angle over which a ring fades as it swings edge-on, about 1.7 degrees.
+ *  A zero-thickness disc covers almost no pixels there, so the fade goes unnoticed. */
+const RING_EDGE_FADE = 0.03;
+/** How steeply transmitted light falls off with ring density on the shaded face. Rings are
+ *  translucent, so from the unlit side the thin gaps glow while the dense B ring goes dark. */
+const RING_EXTINCTION = 3.0;
+/** Gain on that transmitted term. Above 1 because the extinction has already cut it well below
+ *  1 everywhere the rings are dense enough to see. Set to 0 to blank the shaded face instead. */
+const RING_TRANSMIT = 2.6;
+/** Scratch values for the ring shading maths */
+const RING_NORMAL = new Vector3();
+const RING_SUN = new Vector3();
+const RING_QUAT = new Quaternion();
+/** Night-side light intensity. Real city lights are orders of magnitude fainter than daylight;
+ *  this value only aims for visible but clearly dimmer. */
 const NIGHT_INTENSITY = 0.45;
-/** 云层壳相对地表的高度倍率（地球 ≈ 16 km） */
+/** Cloud shell height as a multiple of the surface radius (about 16 km for Earth) */
 const CLOUD_SHELL = 1.0025;
-/** 云层自转比地表快的比例，制造缓慢的相对漂移 */
+/** How much faster the clouds turn than the surface, producing a slow relative drift */
 const CLOUD_DRIFT = 0.02;
-/** 日面临边相对中心的亮度（真实太阳可见光波段约 0.3~0.4） */
+/** Solar limb brightness relative to disc centre (0.3 to 0.4 in the visible for the real Sun) */
 const LIMB_EDGE = 0.34;
-/** 日面亮度过曝倍数：最亮的米粒组织削到纯白，观感才够"刺眼" */
+/** Overdrive applied to the solar disc so the brightest granulation clips to white, which is
+ *  what sells the glare */
 const STAR_OVERDRIVE = 1.55;
-/** 星芒的屏幕尺寸上限（像素），免得贴近时糊满整屏 */
+/** Screen-size cap for the starburst in pixels, so it cannot smother the view up close */
 const STAR_FLARE_MAX_PX = 900;
-/** 相机到恒星近于该距离时不画星芒，到 FADE 距离恢复满强度（AU） */
+/** Below this camera distance the starburst is dropped, recovering full strength by FADE (AU) */
 const STAR_FLARE_MIN_AU = 2.0;
 const STAR_FLARE_FADE_AU = 2.6;
-/** 面纱眩光：1 AU 处的强度，以及它铺开的屏幕尺寸 */
+/** Veiling glare: strength at 1 AU, and the screen size it spreads over */
 const GLARE_GAIN = 2;
 const GLARE_SPAN_PX = 2000;
-/** 相机近于该距离时不画眩光（贴脸看日面时别挡路），到 FADE 距离恢复（AU） */
+/** Below this distance the glare is dropped so it cannot block a close look at the disc,
+ *  recovering by FADE (AU) */
 const GLARE_MIN_AU = 0.03;
 const GLARE_FADE_AU = 0.06;
 
-/** 按天体大小挑球体细分 */
+/** Sphere tessellation chosen by body size */
 function segmentsFor(body) {
   if (body.kind === 'star') return [128, 64];
   if (body.kind === 'planet') return [96, 48];
@@ -44,24 +64,27 @@ function segmentsFor(body) {
 }
 
 /**
- * 一个天体的全部可视对象：球体 + 恒定屏幕尺寸的光点 + 可选星环 / 云层。
- * 所有对象都直接挂在 scene 下（不做父子嵌套），位置每帧由浮动原点写入。
+ * Everything drawn for one body: the sphere, a fixed-screen-size dot, and optional rings and
+ * clouds. All of it hangs directly off the scene without parent-child nesting, and positions
+ * are written each frame by the floating origin.
  */
 export class BodyView {
-  /** @param {Map<string, import('three').Texture>} assets 预加载好的真实纹理 */
+  /** @param {Map<string, import('three').Texture>} assets preloaded real textures */
   constructor(body, scene, assets = new Map()) {
     this.body = body;
     const def = body.def;
-    // 球体按赤道半径建、再沿极轴压扁 (1−f)，得到的正是真实的扁球体
+    // The sphere is built at the equatorial radius and squashed by (1-f) along the polar axis,
+    // which is exactly the real oblate spheroid
     const radiusUnits = body.equatorialRadius * KM_TO_UNITS;
 
     const [ws, hs] = segmentsFor(body);
     const geo = new SphereGeometry(radiusUnits, ws, hs);
-    // three 的球极点在 +Y；本工程天体自转轴用 +Z，这里把几何体扳正，
-    // 这样贴图的 v 方向 = 天体纬度，星环也落在 local XY 平面。
+    // three puts the sphere's pole at +Y while this project spins bodies about +Z, so the
+    // geometry is rotated upright. The texture's v axis then runs with latitude and the rings
+    // land in the local XY plane.
     geo.rotateX(Math.PI / 2);
 
-    // 有真实纹理就用真实的，否则回退到程序化表面
+    // Use the real texture where one exists, otherwise fall back to a procedural surface
     const realMap = pickTexture(assets, def.tex?.map);
     const nightMap = pickTexture(assets, def.tex?.night);
     const cloudMap = pickTexture(assets, def.tex?.clouds, 'linear');
@@ -84,10 +107,11 @@ export class BodyView {
     }
 
     this.mesh = new Mesh(geo, this.material);
-    this.mesh.frustumCulled = false; // 位置每帧手写，让 three 自己剔除容易误判
+    this.mesh.frustumCulled = false; // positions are written by hand, so three's culling misjudges
     this.mesh.renderOrder = 1;
 
-    // 自转轴指向：赤道系旋转是常量，自转角每帧叠在它后面（绕自身 +Z）
+    // Spin axis orientation. The equatorial rotation is constant and the spin angle is applied
+    // after it, about the body's own +Z.
     this.frameQuat = new Quaternion();
     if (body.frame) {
       this.frameQuat.setFromRotationMatrix(new Matrix4().setFromMatrix3(body.frame));
@@ -95,13 +119,13 @@ export class BodyView {
     this.mesh.quaternion.copy(this.frameQuat);
     this.spinQuat = new Quaternion();
     this.spinAxis = new Vector3(0, 0, 1);
-    // 扁率：沿自转轴压扁
+    // Flattening: squash along the spin axis
     const f = def.flattening || 0;
     if (f > 0) this.mesh.scale.set(1, 1, 1 - f);
 
     scene.add(this.mesh);
 
-    // ---- 云层壳 ----
+    // ---- Cloud shell ----
     this.clouds = null;
     if (cloudMap) {
       const cgeo = new SphereGeometry(radiusUnits * CLOUD_SHELL, ws, hs);
@@ -121,11 +145,12 @@ export class BodyView {
       scene.add(this.clouds);
     }
 
-    // ---- 恒定屏幕尺寸的光点（天体小到看不见时接管）----
+    // ---- Fixed-screen-size dot, which takes over once a body is too small to see ----
     const isStar = body.kind === 'star';
     const tint = new Color(def.palette ? def.palette[def.palette.length - 1] : '#ffffff');
-    // 恒星的星芒故意推到 1.0 以上：核心削成纯白，芒的中间调也跟着提亮，
-    // 这是在不上后期 bloom 的前提下最接近"过曝发光"的手段
+    // A star's tint is pushed deliberately past 1.0 so the core clips to pure white and the
+    // spikes' midtones brighten with it. Without a post-process bloom this is the closest
+    // approximation to an overexposed light source.
     if (isStar) tint.setRGB(1.75, 1.62, 1.44);
     this.dot = new Sprite(new SpriteMaterial({
       map: isStar ? getStarburstTexture() : getGlowTexture(),
@@ -142,9 +167,11 @@ export class BodyView {
     this.dotSizePx = DOT_SIZE_PX[body.kind] ?? 6;
     scene.add(this.dot);
 
-    // ---- 恒星贴边热晕 ----
-    // depthTest:true —— 精灵面片过日心，被日面球体挡掉的正好是圆面内部，
-    // 于是这层叠加光只出现在临边之外，既不糊掉日面细节，凌日的行星也不会被冲掉。
+    // ---- Stellar limb halo ----
+    // depthTest:true matters here. The sprite quad passes through the star's centre, and what
+    // the solar disc occludes is precisely the interior of the circle, so this additive layer
+    // only appears beyond the limb. Disc detail stays sharp and a transiting planet is not
+    // washed out.
     this.halo = null;
     if (body.kind === 'star') {
       this.halo = new Sprite(new SpriteMaterial({
@@ -162,8 +189,9 @@ export class BodyView {
       this.halo.scale.setScalar(radiusUnits * 2.4);
       scene.add(this.halo);
 
-      // 面纱眩光：唯一一层 depthTest:false 的，因为它模拟的是光进入镜头之后
-      // 在镜头内部散射出来的雾——它本来就该盖在整个画面上，而不是被几何体挡住。
+      // Veiling glare, the one layer with depthTest:false. It models the haze light scatters
+      // inside the lens after entering it, which belongs over the whole image rather than
+      // behind the geometry.
       this.glare = new Sprite(new SpriteMaterial({
         map: getGlareTexture(),
         color: new Color('#fff3dc'),
@@ -175,17 +203,17 @@ export class BodyView {
         opacity: 0,
       }));
       this.glare.frustumCulled = false;
-      this.glare.renderOrder = 50; // 最后画
+      this.glare.renderOrder = 50; // drawn last
       scene.add(this.glare);
     }
 
-    // ---- 星环 ----
+    // ---- Rings ----
     this.rings = null;
     if (def.rings) {
       const inner = def.rings.innerKm * KM_TO_UNITS;
       const outer = def.rings.outerKm * KM_TO_UNITS;
       const rgeo = new RingGeometry(inner, outer, 256, 1);
-      // 自定义 UV：u 沿半径方向铺开，配合径向环带贴图
+      // Custom UVs: u runs along the radius, matching the radial ring strip texture
       const pos = rgeo.attributes.position;
       const uv = [];
       for (let i = 0; i < pos.count; i++) {
@@ -194,9 +222,11 @@ export class BodyView {
       }
       rgeo.setAttribute('uv', new Float32BufferAttribute(uv, 2));
 
-      // 环用 Basic 而不是 Standard：环面法线沿自转轴，阳光几乎掠射，
-      // 兰伯特模型会把它算得几乎全黑；真实环靠强后向散射亮得接近行星本体。
-      // 这里直接按"到太阳距离的平方反比"给亮度，交给自动曝光统一压缩。
+      // The rings use Basic rather than Standard. Their normal points along the spin axis and
+      // sunlight arrives at a grazing angle, so a Lambertian model renders them nearly black,
+      // while real rings are almost as bright as the planet thanks to strong backscatter.
+      // Brightness is therefore set straight from the inverse square of the solar distance and
+      // left for auto-exposure to compress.
       this.ringTint = new Color(def.rings.tint || '#d0c0a0');
       this.rings = new Mesh(rgeo, new MeshBasicMaterial({
         map: pickTexture(assets, def.tex?.ring) || makeRingTexture(def),
@@ -207,16 +237,84 @@ export class BodyView {
       }));
       this.rings.frustumCulled = false;
       this.rings.renderOrder = 2;
-      this.rings.quaternion.copy(this.frameQuat); // 环固定在赤道面，不跟着自转
+      this.rings.quaternion.copy(this.frameQuat); // rings sit in the equatorial plane and do not spin
+      this.#attachRingShading(def);
       scene.add(this.rings);
     }
   }
 
   /**
-   * 日面的临边昏暗 + 过曝。
-   * 真实太阳的边缘明显比中心暗（视线斜穿光球，看到的是更浅更冷的层），
-   * 加上这一层，日面就从"一张贴了图的球"变成"一颗在发光的星"；
-   * 再把亮度推过 1.0，最亮的米粒组织直接削到纯白，观感上就"刺眼"了。
+   * Ring shading: the planet's own shadow, and transmitted light on the shaded face.
+   *
+   * Both need the fragment's position within the ring, so the local vertex position travels
+   * through as a varying. Ring points lie in the local z = 0 plane with the planet at the
+   * origin, which makes the shadow test cheap.
+   */
+  #attachRingShading(def) {
+    this.ringFlatten = 1 - (def.flattening || 0);
+    this.ringUniforms = {
+      uShadowAxis: { value: new Vector3(0, 0, 1) },
+      uLitFacing: { value: 1 },
+      uPlanetR: { value: this.body.equatorialRadius * KM_TO_UNITS },
+      uPenumbra: { value: 0 },
+      uTransmit: { value: RING_TRANSMIT },
+    };
+
+    this.rings.material.onBeforeCompile = (shader) => {
+      Object.assign(shader.uniforms, this.ringUniforms);
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', `#include <common>
+          varying vec3 vRingLocal;`)
+        .replace('#include <begin_vertex>', `#include <begin_vertex>
+          vRingLocal = position;`);
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', `#include <common>
+          uniform vec3 uShadowAxis;
+          uniform float uLitFacing;
+          uniform float uPlanetR;
+          uniform float uPenumbra;
+          uniform float uTransmit;
+          varying vec3 vRingLocal;`)
+        .replace('#include <map_fragment>', `#include <map_fragment>
+          {
+            // The planet's shadow. A ring point is eclipsed when it lies behind the planet
+            // along the Sun direction and inside its silhouette. Squashing space along the
+            // polar axis turns the oblate planet into a sphere; ring points sit at local
+            // z = 0 and are untouched by that, so only the shadow axis carries the squash,
+            // which the CPU side folds in.
+            float t = dot(vRingLocal, uShadowAxis);
+            if (t < 0.0) {
+              float d = length(vRingLocal - t * uShadowAxis);
+              // The Sun is a disc, so the shadow edge softens with distance behind the planet.
+              float pen = max(uPenumbra * abs(t), uPlanetR * 0.001);
+              diffuseColor.rgb *= smoothstep(uPlanetR - pen, uPlanetR + pen, d);
+            }
+            // On the shaded face what reaches the eye came through the rings, so the dense
+            // regions go dark while the thin ones stay comparatively bright. This is the
+            // contrast inversion Cassini photographed from Saturn's unlit side.
+            //
+            // Which face is visible is decided on the CPU rather than from gl_FrontFacing:
+            // RingGeometry reports front-facing when viewed from its local -Z, the opposite of
+            // what its +Z normals suggest, and depending on that is an easy way to get the
+            // lit and shaded sides backwards.
+            if (uLitFacing < 0.0) {
+              float tau = texture2D(map, vMapUv).a;
+              diffuseColor.rgb *= uTransmit * exp(-${RING_EXTINCTION.toFixed(2)} * tau);
+            }
+          }`);
+    };
+    // The key has to be per body: Saturn and Uranus both patch a MeshBasicMaterial here, and a
+    // shared key makes three hand them one compiled program, after which only one of the two
+    // gets its custom uniforms bound and the other renders with whatever was left behind.
+    this.rings.material.customProgramCacheKey = () => `helios-rings-${this.body.id}`;
+  }
+
+  /**
+   * Limb darkening and overdrive on the solar disc.
+   * The real Sun is markedly darker at the edge, where the line of sight cuts obliquely through
+   * the photosphere and reaches a shallower, cooler layer. Adding that turns the disc from a
+   * textured ball into something that reads as a star, and pushing brightness past 1.0 clips the
+   * brightest granulation to white, which is what makes it look painful to look at.
    */
   #attachLimbDarkening() {
     this.material.onBeforeCompile = (shader) => {
@@ -242,8 +340,9 @@ export class BodyView {
   }
 
   /**
-   * 夜面城市灯光。three 内置的 emissiveMap 是无条件叠加的（白天也会亮），
-   * 所以补一段 shader：按太阳方向和法线的夹角做遮罩，只在背光面加发光。
+   * Night-side city lights. three's built-in emissiveMap adds unconditionally and would glow
+   * in daylight too, so a small shader patch masks it by the angle between the sun direction
+   * and the normal, lighting only the unlit hemisphere.
    */
   #attachNightSide(nightMap) {
     this.sunViewPos = new Vector3(0, 0, 1);
@@ -261,35 +360,38 @@ export class BodyView {
           uniform float uNightIntensity;`)
         .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
           {
-            vec3 fragPos = -vViewPosition;                       // 片元的观察空间坐标
+            vec3 fragPos = -vViewPosition;                       // fragment position in view space
             vec3 sunDir = normalize(uSunViewPos - fragPos);
             float ndl = dot(normal, sunDir);
-            float nightMask = 1.0 - smoothstep(-0.15, 0.12, ndl); // 只在晨昏线之外亮
+            float nightMask = 1.0 - smoothstep(-0.15, 0.12, ndl); // lit only beyond the terminator
             totalEmissiveRadiance += texture2D(uNightMap, vMapUv).rgb * nightMask * uNightIntensity;
           }`);
     };
-    // 否则会和别的同参数 MeshStandardMaterial 共用同一份已编译程序
+    // Without this it would share a compiled program with any other MeshStandardMaterial
+    // carrying the same parameters
     this.material.customProgramCacheKey = () => 'helios-nightside';
   }
 
-  /** 主循环每帧把太阳在观察空间的位置喂进来（夜面遮罩要用） */
+  /** The main loop feeds in the Sun's view-space position each frame, for the night-side mask */
   setSunViewPos(v) {
     this.sunViewPos?.copy(v);
   }
 
   /**
-   * 每帧更新：写入相对相机的位置，并按屏幕尺寸在"球体"和"光点"之间过渡。
-   * @param {import('three').Vector3} rel 相对相机的位置（场景单位）
-   * @param {number} pxRadius 天体在屏幕上的像素半径
-   * @param {number} unitsPerPixel 该距离上 1 像素对应多少场景单位（光点靠它保持恒定屏幕尺寸）
-   * @param {boolean} onScreen 是否在相机前方
+   * Per-frame update: write the camera-relative position and cross-fade between sphere and dot
+   * according to screen size.
+   * @param {import('three').Vector3} rel position relative to the camera (scene units)
+   * @param {number} pxRadius body radius on screen, in pixels
+   * @param {number} unitsPerPixel scene units per pixel at this distance, which is how the dot
+   *   holds a constant screen size
+   * @param {boolean} onScreen whether the body is in front of the camera
    */
   update(rel, pxRadius, unitsPerPixel, onScreen) {
-    // 自转：赤道系朝向（常量）后面叠一个绕自身极轴的转角
+    // Rotation: the constant equatorial orientation, then a spin angle about the polar axis
     this.spinQuat.setFromAxisAngle(this.spinAxis, this.body.spin);
     this.mesh.quaternion.copy(this.frameQuat).multiply(this.spinQuat);
     if (this.clouds) {
-      // 云层比地表略快一点，制造缓慢的相对漂移
+      // Clouds run slightly faster than the surface, producing a slow relative drift
       this.spinQuat.setFromAxisAngle(this.spinAxis, this.body.spin * (1 + CLOUD_DRIFT));
       this.clouds.quaternion.copy(this.frameQuat).multiply(this.spinQuat);
     }
@@ -300,23 +402,44 @@ export class BodyView {
     this.dot.position.copy(rel);
     if (this.glare) this.glare.position.copy(rel);
 
-    // 球体：像素半径 < 0.35 就没必要画了
+    // Sphere: below a pixel radius of 0.35 there is nothing worth drawing
     const meshVisible = onScreen && pxRadius > 0.35;
     this.mesh.visible = meshVisible;
     if (this.clouds) this.clouds.visible = meshVisible && pxRadius > 2;
     if (this.rings) {
-      this.rings.visible = meshVisible && pxRadius > 1.5;
+      // Fade out as the rings swing edge-on, where a zero-thickness disc covers no pixels anyway
+      RING_NORMAL.set(0, 0, 1).applyQuaternion(this.frameQuat);
+      const camSide = RING_NORMAL.dot(rel) / Math.max(rel.length(), 1e-12);
+      const sideFade = smoothstep(0, RING_EDGE_FADE, Math.abs(camSide));
+
+      this.rings.visible = meshVisible && pxRadius > 1.5 && sideFade > 0.004;
       if (this.rings.visible) {
-        const au = this.body.sunDistance / AU_KM;
+        const sunDistKm = this.body.sunDistance;
+        const au = sunDistKm / AU_KM;
         this.rings.material.color.copy(this.ringTint).multiplyScalar(RING_ALBEDO / (au * au));
+        this.rings.material.opacity = sideFade;
+
+        // Sun direction in the ring's own frame. The Sun sits at the origin of the heliocentric
+        // frame, so the direction from the planet towards it is just -position.
+        RING_SUN.copy(this.body.position).multiplyScalar(-1).normalize()
+          .applyQuaternion(RING_QUAT.copy(this.frameQuat).invert());
+        // The camera's own component along the ring normal. rel points from the camera to the
+        // body, so its sign is inverted. Matching signs mean the lit face is turned towards us.
+        const camAlongNormal = -camSide;
+        this.ringUniforms.uLitFacing.value = (camAlongNormal >= 0) === (RING_SUN.z >= 0) ? 1 : -1;
+        // Squashed along the polar axis, so the shadow test can treat the planet as a sphere
+        this.ringUniforms.uShadowAxis.value
+          .set(RING_SUN.x, RING_SUN.y, RING_SUN.z / this.ringFlatten).normalize();
+        this.ringUniforms.uPenumbra.value = SUN_RADIUS_KM / Math.max(sunDistKm, 1);
       }
     }
 
-    // 光点：视半径越小越显眼
+    // Dot: the smaller the apparent radius, the more prominent it becomes
     const a = 1 - smoothstep(DOT_FULL_PX, DOT_TAKEOVER_PX, pxRadius);
     if (this.body.kind === 'star') {
-      // 恒星的星芒在远处代表"一颗耀眼的星"；但抵近到 STAR_FLARE_MIN_AU 以内，
-      // 日面已经解析得很大，衍射芒反而显得假，这时交给面纱眩光独自表现。
+      // At a distance the starburst is what makes a star read as brilliant, but closer than
+      // STAR_FLARE_MIN_AU the disc is well resolved and diffraction spikes start to look fake,
+      // so the veiling glare carries the impression alone.
       const near = smoothstep(
         STAR_FLARE_MIN_AU * AU_KM,
         STAR_FLARE_FADE_AU * AU_KM,
@@ -339,16 +462,16 @@ export class BodyView {
     }
 
     if (this.halo) {
-      // 日面被解析出来之后热晕才有意义，否则观感全交给星芒
+      // The halo only means anything once the disc is resolved; before that the starburst carries it
       const solar = smoothstep(1.2, 6, pxRadius);
       this.halo.visible = onScreen && solar > 0.01;
       this.halo.material.opacity = 0.85 * solar;
 
-      // 面纱眩光强度直接跟进入镜头的太阳辐照度走（平方反比），
-      // 于是地球附近刺眼、木星轨道外基本没有——这正是真实相机的行为。
-      // 被行星挡住时立刻消失（日食/凌日）。
-      // 但抵近到 GLARE_MIN_AU 以内就撤掉：那个距离上用户多半是在看日面本身，
-      // 一层洗白整屏的光雾只会挡路。
+      // Glare strength follows the solar irradiance entering the lens, so it is blinding near
+      // Earth and essentially gone beyond Jupiter's orbit, which is how a real camera behaves.
+      // Occlusion by a planet kills it instantly, covering eclipses and transits. Closer than
+      // GLARE_MIN_AU it is dropped as well: at that range the viewer is almost certainly
+      // looking at the disc itself, and a screen-wide wash of haze only gets in the way.
       const au = this.body.screen.dist / AU_KM;
       const irr = 1 / Math.max(au * au, 1e-9);
       const inner = smoothstep(GLARE_MIN_AU, GLARE_FADE_AU, au);

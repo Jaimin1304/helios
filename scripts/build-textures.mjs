@@ -1,18 +1,18 @@
 /**
- * 纹理派生图构建。
+ * Texture derivative build.
  *
- * 素材目录 solar_textures/ 里多是 8192×4096 的 jpg（合计 ~66 MB），但运行时
- * assets.js 一律在解码阶段降采样到 TEXTURE_MAX_WIDTH(2048) —— 也就是说
- * 下载下来的像素有 94% 是直接扔掉的。这里在构建期就把它们缩到目标宽度并
- * 转成 webp，实测 66 MB → 2.2 MB（30×），而且**画质零损失**：运行时本来
- * 看到的就是 2048 宽的图。
+ * Most of the art in solar_textures/ is 8192x4096 jpg, about 66 MB for the files actually
+ * referenced, yet assets.js downsamples everything to TEXTURE_MAX_WIDTH (2048) during decode
+ * at runtime. Roughly 94% of the downloaded pixels are thrown away. Shrinking them to the
+ * target width at build time and converting to webp measures 66 MB down to 2.5 MB, and the
+ * quality is unchanged because 2048 wide is what the runtime was showing all along.
  *
- * 原始 8K 素材保留在 solar_textures/ 不动，以后想调高 TEXTURE_MAX_WIDTH
- * 只要重跑本脚本即可。
+ * The original 8K art stays untouched in solar_textures/, so raising TEXTURE_MAX_WIDTH later
+ * only needs a re-run of this script.
  *
- * 用法：
- *   npm run textures            （vite build 也会自动调用）
- *   npm run textures -- --force （忽略缓存，全部重压）
+ * Usage:
+ *   npm run textures            (vite build calls this automatically)
+ *   npm run textures -- --force (ignore the cache and re-encode everything)
  */
 import { readdir, readFile, writeFile, mkdir, stat } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
@@ -25,24 +25,24 @@ const SRC_DIR = join(ROOT, 'solar_textures');
 const OUT_DIR = join(ROOT, '.textures');
 const MANIFEST = join(OUT_DIR, 'manifest.json');
 
-/** 有损档位。源图本身已是有损 jpg，82 再压一道肉眼看不出差别。 */
+/** Lossy setting. The sources are already lossy jpg, and a second pass at 82 is invisible. */
 const QUALITY = 82;
 const EFFORT = 5;
 
 /**
- * 逐文件的宽度上限覆盖。默认取 TEXTURE_MAX_WIDTH —— 运行时 assets.js 反正会
- * 降到那个宽度，所以预缩是无损的。
+ * Per-file overrides for the width cap. The default is TEXTURE_MAX_WIDTH, and pre-shrinking to
+ * it is lossless because assets.js would reduce the image to that width anyway.
  *
- * 天球是唯一的例外：sky.js 不走 assets.js，它加载多大就用多大，而且铺满整个
- * 背景。50° 视场横跨的只有全图的 1/7，8192 宽也才勉强够 1:1 采样，缩到 2048
- * 会明显发糊。好在那张图大半是黑的，8192 的 webp 只要 0.30 MB，比原来的
- * 1.82 MB jpg 还小——等于白捡。
+ * The sky is the one exception. sky.js bypasses assets.js and uses whatever it loads, and the
+ * texture covers the entire background. A 50 degree field spans only a seventh of the image,
+ * so even 8192 wide is barely 1:1 sampling and 2048 goes visibly soft. The image is mostly
+ * black, so 8192 in webp costs 0.30 MB, less than the 1.82 MB jpg it replaces.
  */
 const WIDTH_OVERRIDE = {
   '8k_stars_milky_way.jpg': 8192,
 };
 
-/** 扫 src/ 与 index.html，只转真正被引用到的纹理 */
+/** Scan src/ and index.html, converting only textures that are actually referenced */
 async function referencedNames() {
   const names = new Set();
   const collect = (text) => {
@@ -64,10 +64,10 @@ const mb = (n) => (n / 1048576).toFixed(2);
 
 /**
  * @returns {Promise<{map: Record<string,string>, outDir: string}>}
- *   map 是「原始文件名 → 派生文件名」，注入到前端供 resolveTextureUrl() 用
+ *   map is the original-to-derived filename mapping, injected for resolveTextureUrl()
  */
 export async function buildTextures({ force = false, quiet = false } = {}) {
-  if (!existsSync(SRC_DIR)) throw new Error(`找不到素材目录 ${SRC_DIR}`);
+  if (!existsSync(SRC_DIR)) throw new Error(`source directory not found: ${SRC_DIR}`);
   await mkdir(OUT_DIR, { recursive: true });
 
   const wanted = await referencedNames();
@@ -80,14 +80,14 @@ export async function buildTextures({ force = false, quiet = false } = {}) {
   for (const name of [...wanted].sort()) {
     const srcPath = join(SRC_DIR, name);
     if (!existsSync(srcPath)) {
-      throw new Error(`src 里引用了 solar_textures/${name}，但素材目录里没有这个文件`);
+      throw new Error(`src references solar_textures/${name}, but no such file exists`);
     }
     const st = await stat(srcPath);
     const maxWidth = WIDTH_OVERRIDE[name] ?? TEXTURE_MAX_WIDTH;
     const outName = `${basename(name, extname(name))}.webp`;
     const outPath = join(OUT_DIR, outName);
 
-    // 增量：源文件大小/时间与参数都没变、产物还在，就跳过
+    // Incremental: skip when source size, mtime and parameters are unchanged and output survives
     const stamp = {
       out: outName, size: st.size, mtimeMs: st.mtimeMs, width: maxWidth, q: QUALITY,
     };
@@ -102,8 +102,9 @@ export async function buildTextures({ force = false, quiet = false } = {}) {
     } else {
       const img = sharp(srcPath, { limitInputPixels: false });
       const meta = await img.metadata();
-      // 带 alpha 的（土星环条带）走无损：那张图的 alpha 是**数据**不是外观，
-      // 有损压缩会在卡西尼缝边缘糊出条带。反正它本来也只有几十 KB。
+      // Anything with alpha (the Saturn ring strip) is encoded losslessly. Its alpha channel is
+      // DATA rather than appearance, and lossy compression bands the edge of the Cassini
+      // division. It only costs a few tens of KB either way.
       const enc = meta.hasAlpha
         ? { lossless: true, effort: EFFORT }
         : { quality: QUALITY, effort: EFFORT };
@@ -123,22 +124,22 @@ export async function buildTextures({ force = false, quiet = false } = {}) {
   await writeFile(MANIFEST, JSON.stringify(next, null, 2));
 
   if (!quiet) {
-    console.log(`\n纹理派生图 → .textures/   (默认上限 ${TEXTURE_MAX_WIDTH} px, webp q${QUALITY})`);
+    console.log(`\nTexture derivatives -> .textures/   (default cap ${TEXTURE_MAX_WIDTH} px, webp q${QUALITY})`);
     console.log('─'.repeat(68));
     for (const r of rows) {
       const note = r.maxWidth === TEXTURE_MAX_WIDTH ? '' : `  @${r.maxWidth}px`;
       console.log(`  ${r.name.padEnd(26)} ${mb(r.inSize).padStart(7)} → ${mb(r.outSize).padStart(6)} MB`
-        + `${note}${r.hit ? '  (缓存)' : ''}`);
+        + `${note}${r.hit ? '  (cached)' : ''}`);
     }
     console.log('─'.repeat(68));
-    console.log(`  ${'合计'.padEnd(25)} ${mb(totalIn).padStart(7)} → ${mb(totalOut).padStart(6)} MB`
+    console.log(`  ${'total'.padEnd(25)} ${mb(totalIn).padStart(7)} -> ${mb(totalOut).padStart(6)} MB`
       + `   ${(totalIn / totalOut).toFixed(1)}×\n`);
   }
 
   return { map: Object.fromEntries(rows.map((r) => [r.name, r.outName])), outDir: OUT_DIR };
 }
 
-// 直接运行时执行一次
+// Run once when invoked directly
 if (process.argv[1] && resolve(process.argv[1]) === resolve(import.meta.filename)) {
   await buildTextures({ force: process.argv.includes('--force') });
 }

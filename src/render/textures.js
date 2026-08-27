@@ -2,11 +2,11 @@ import { CanvasTexture, SRGBColorSpace, LinearSRGBColorSpace, RepeatWrapping } f
 import { fbm, ridged, makeRamp, clamp01, smoothstep, rng, seedOf, hexToRgb } from './noise.js';
 
 /**
- * 程序化天体表面。生成等距柱状投影(equirectangular)的 albedo + 高度图。
- * 噪声在球面方向上采样，因此左右接缝天然连续。
+ * Procedural body surfaces, generating an equirectangular albedo map and a height map.
+ * Noise is sampled along sphere directions, so the left and right seam matches by construction.
  *
- * ⚠️ 这是"占位"材质，等后续接入真实纹理时整个模块可以直接换掉，
- *    对外只需保持 makeSurface(def) → {map, bump} 这个接口。
+ * These are placeholder materials. Once real textures cover a body the whole module can be
+ * swapped out, provided makeSurface(def) keeps returning {map, bump}.
  */
 
 function sizeFor(def) {
@@ -25,7 +25,8 @@ function makeCanvas(w, h) {
   return c;
 }
 
-/** 在等距柱状图上画一个环形山（含边缘的经度拉伸补偿与横向绕回） */
+/** Draw one crater on the equirectangular map, compensating for longitude stretch near the
+ *  poles and wrapping horizontally */
 function drawCrater(ctx, cx, cy, r, W, sx, strength) {
   for (const dx of [0, -W, W]) {
     ctx.save();
@@ -45,14 +46,14 @@ function drawCrater(ctx, cx, cy, r, W, sx, strength) {
   }
 }
 
-/** 沿大圆画一条裂纹（冰卫星） */
+/** Draw a crack along a great circle, for icy moons */
 function drawCrack(ctx, W, H, rand, color, width) {
-  // 随机正交基，构造一条大圆
+  // A random orthogonal basis defining a great circle
   const a = rand() * Math.PI * 2, b = Math.acos(2 * rand() - 1);
   const u = [Math.sin(b) * Math.cos(a), Math.sin(b) * Math.sin(a), Math.cos(b)];
   const t = rand() * Math.PI * 2;
   let v = [Math.cos(t), Math.sin(t), 0];
-  // 施密特正交化
+  // Gram-Schmidt orthogonalisation
   const d = u[0] * v[0] + u[1] * v[1] + u[2] * v[2];
   v = [v[0] - d * u[0], v[1] - d * u[1], v[2] - d * u[2]];
   const len = Math.hypot(v[0], v[1], v[2]) || 1;
@@ -87,7 +88,7 @@ export function makeSurface(def) {
   const ramp = makeRamp(def.palette || ['#3a3a3a', '#7a7a7a', '#b0b0b0', '#e0e0e0']);
   const seed = seedOf(def.id);
   const rand = rng(seed);
-  const jitter = (seed % 997) * 0.37; // 每个天体的噪声偏移，避免长得一样
+  const jitter = (seed % 997) * 0.37; // per-body noise offset, so no two look alike
 
   const colorCanvas = makeCanvas(W, H);
   const cctx = colorCanvas.getContext('2d', { willReadFrequently: false });
@@ -111,7 +112,7 @@ export function makeSurface(def) {
       const dy = cl * Math.sin(lon) + jitter;
       const dz = sl + jitter;
 
-      let t; // 0..1 → 调色板
+      let t; // 0..1, indexes the palette
       let height = 0.5;
 
       switch (def.style) {
@@ -126,7 +127,7 @@ export function makeSurface(def) {
           const fine = (fbm(dx * 9, dy * 22, dz * 9, 4) - 0.5) * 0.22;
           const s = Math.sin((latN * bands + warp * 1.6) * Math.PI);
           t = clamp01(0.5 + 0.42 * s + fine);
-          // 极区略暗
+          // Polar regions run slightly darker
           t *= 1 - 0.28 * Math.pow(Math.abs(latN), 3.5);
           break;
         }
@@ -142,7 +143,7 @@ export function makeSurface(def) {
           const land = cont + (detail - 0.5) * 0.14;
           const ice = smoothstep(0.72, 0.95, Math.abs(latN));
           if (land < 0.52) {
-            // 海洋：深浅两级
+            // Ocean, in two depth tiers
             t = clamp01((land / 0.52) * 0.28);
             height = 0.34;
           } else {
@@ -180,7 +181,7 @@ export function makeSurface(def) {
         default: {
           const base = fbm(dx * 2.2, dy * 2.2, dz * 2.2, octaves);
           const rough = fbm(dx * 9, dy * 9, dz * 9, 4);
-          const mare = smoothstep(0.42, 0.5, base) * 0.35; // 暗色平原
+          const mare = smoothstep(0.42, 0.5, base) * 0.35; // dark plains
           t = clamp01(0.22 + base * 0.72 + (rough - 0.5) * 0.3 - mare);
           height = clamp01(base * 0.65 + rough * 0.35);
           break;
@@ -213,13 +214,13 @@ export function makeSurface(def) {
     bctx.putImageData(new ImageData(hdata, W, H), 0, 0);
   }
 
-  // ---- 后期：环形山 / 裂纹 / 大红斑 ----
+  // ---- Post pass: craters, cracks, Great Red Spot ----
   if (def.craters) {
     for (let k = 0; k < def.craters; k++) {
       const lat = Math.asin(2 * rand() - 1) * 0.94;
       const cy = (0.5 - lat / Math.PI) * H;
       const cx = rand() * W;
-      // 幂律尺寸分布：绝大多数是小坑，偶尔一个大盆地
+      // Power-law size distribution: mostly small pits with the occasional large basin
       const r = (0.0035 + Math.pow(rand(), 4) * 0.05) * W;
       const sx = Math.min(4, 1 / Math.max(0.25, Math.cos(lat)));
       const strength = 0.45 + rand() * 0.55;
@@ -272,7 +273,7 @@ export function makeSurface(def) {
   return { map, bump };
 }
 
-/** 土星/天王星环：1D 径向 RGBA 带（含卡西尼缝） */
+/** Saturn and Uranus rings: a 1D radial RGBA strip including the Cassini division */
 export function makeRingTexture(def) {
   const N = 1024;
   const canvas = makeCanvas(N, 1);
@@ -283,9 +284,9 @@ export function makeRingTexture(def) {
   const noiseSeed = rand() * 100;
 
   for (let i = 0; i < N; i++) {
-    const x = i / (N - 1); // 0=内缘 1=外缘
+    const x = i / (N - 1); // 0 = inner edge, 1 = outer edge
     let a = 1;
-    // 大尺度分区
+    // Large-scale divisions
     a *= 0.35 + 0.65 * smoothstep(0.0, 0.08, x);
     a *= 1 - smoothstep(0.93, 1.0, x);
     if (def.id === 'saturn') {
@@ -294,7 +295,7 @@ export function makeRingTexture(def) {
       const bRing = 0.55 + 0.45 * smoothstep(0.18, 0.30, x) * (1 - smoothstep(0.62, 0.70, x));
       a *= cassini * encke * (0.55 + bRing);
     }
-    // 细环纹
+    // Fine ringlets
     let fine = 0;
     for (let o = 1; o <= 4; o++) {
       fine += Math.sin((x * 140 * o + noiseSeed * o) * Math.PI) / o;
@@ -316,11 +317,12 @@ export function makeRingTexture(def) {
 }
 
 /**
- * 面纱眩光（veiling glare）：极宽、极柔的一层光雾。
+ * Veiling glare: one very wide, very soft layer of haze.
  *
- * 电影里"刺眼"的观感其实主要不是天体本身有多亮，而是强光在镜头/眼球里
- * 散射出的这层雾——它会把靠近光源的画面整体提亮、洗淡对比。
- * 所以这张贴图刻意做得又大又软，靠加法混合铺满一大片。
+ * What makes a light source look painful on film comes mostly from light scattering inside the
+ * lens or the eye rather than from the brightness of the source itself. That scattered haze
+ * lifts everything near the source and washes out its contrast. The texture is therefore made
+ * deliberately large and soft, and additive blending spreads it across a wide area.
  */
 let glareTexture = null;
 export function getGlareTexture() {
@@ -346,9 +348,10 @@ export function getGlareTexture() {
 }
 
 /**
- * 星芒：核心光斑 + 四长四短的衍射芒。
- * 人眼/相机看强光源时必然带芒，这一层是"刺眼"观感的主要来源，
- * 而且它按恒定屏幕尺寸绘制，所以太阳退成一个点时依然是颗耀眼的星。
+ * Starburst: a core highlight plus four long and four short diffraction spikes.
+ * Eyes and cameras always produce spikes on a strong source, and this layer carries most of the
+ * glare impression. It draws at a constant screen size, so the Sun still reads as a brilliant
+ * star once it has shrunk to a point.
  */
 let starburstTexture = null;
 export function getStarburstTexture() {
@@ -382,12 +385,12 @@ export function getStarburstTexture() {
     ctx.stroke();
   };
   for (let k = 0; k < 4; k++) {
-    const a = (k / 4) * Math.PI * 2; // 四根长芒
+    const a = (k / 4) * Math.PI * 2; // four long spikes
     spike(a, N * 0.49, 9, 0.30);
     spike(a, N * 0.47, 2.4, 0.85);
   }
   for (let k = 0; k < 4; k++) {
-    const a = (k / 4) * Math.PI * 2 + Math.PI / 4; // 四根短芒
+    const a = (k / 4) * Math.PI * 2 + Math.PI / 4; // four short spikes
     spike(a, N * 0.26, 5, 0.16);
     spike(a, N * 0.24, 1.6, 0.42);
   }
@@ -397,7 +400,8 @@ export function getStarburstTexture() {
   return starburstTexture;
 }
 
-/** 拉格朗日点的标记：空心菱形 + 中心点，和天体的圆形光斑一眼能区分 */
+/** Lagrange point marker: a hollow diamond with a centre dot, instantly distinguishable from
+ *  the round glow used for bodies */
 let markerTexture = null;
 export function getMarkerTexture() {
   if (markerTexture) return markerTexture;
@@ -405,7 +409,7 @@ export function getMarkerTexture() {
   const c = N / 2;
   const canvas = makeCanvas(N, N);
   const ctx = canvas.getContext('2d');
-  // 纯白，颜色由逐顶点属性决定，这里只提供 alpha 形状
+  // Pure white; colour comes from a per-vertex attribute, so this supplies only the alpha shape
   ctx.strokeStyle = '#fff';
   ctx.lineWidth = 4;
   ctx.lineJoin = 'round';
@@ -425,7 +429,7 @@ export function getMarkerTexture() {
   return markerTexture;
 }
 
-/** 光点/光晕用的径向渐变精灵贴图（全场景共用一张） */
+/** Radial gradient sprite used for dots and halos, shared across the whole scene */
 let glowTexture = null;
 export function getGlowTexture() {
   if (glowTexture) return glowTexture;

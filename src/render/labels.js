@@ -1,12 +1,12 @@
 import { LABEL_MIN_SEP_PX } from '../config.js';
 
 /**
- * 天体名称标签层。真实比例下绝大多数天体都是亚像素的，标签就是找到并点中
- * 它们的主要手段，所以这里做了几件事：
- *   1) 卫星与母天体在屏幕上分不开时不画，避免糊成一团；
- *   2) 按重要度做矩形防重叠（重要的先占位）；
- *   3) 标签本身 pointer-events:none —— 悬停在标签上不能妨碍平移/旋转/缩放，
- *      点击改由画布侧的 hitTest() 在屏幕空间处理。
+ * DOM label layer for body names. At true scale almost every body is sub-pixel, so labels are
+ * the main way to find one and click it. Three things follow from that. A moon whose label
+ * would collide with its primary is dropped rather than smeared over it. Labels claim screen
+ * rectangles in order of importance, so the interesting ones survive a crowded view. And the
+ * labels themselves are pointer-events:none, because hovering one must never block panning,
+ * orbiting or zooming; clicks are resolved by hitTest() against the canvas in screen space.
  */
 const PRIORITY = { star: 0, planet: 1, dwarf: 2, moon: 3, minor: 4 };
 
@@ -17,7 +17,7 @@ export class LabelLayer {
     this.selectedId = null;
     this.hoveredId = null;
     this.entries = [];
-    /** 本帧真正画出来的标签及其屏幕矩形，供拾取用 */
+    /** Labels actually drawn this frame plus their screen rectangles, used for picking */
     this.placed = [];
 
     for (const body of bodies) {
@@ -25,7 +25,8 @@ export class LabelLayer {
       el.className = `tag k-${body.kind}`;
       el.textContent = body.name;
       el.dataset.id = body.id;
-      // 主题色走 CSS 变量而不是直接写 color，这样 .hovered/.selected 还能覆盖
+      // The theme colour goes through a CSS variable rather than color, so .hovered
+      // and .selected can still override it
       el.style.setProperty('--tc', body.theme);
       el.style.display = 'none';
       container.appendChild(el);
@@ -53,7 +54,7 @@ export class LabelLayer {
     for (const e of this.entries) e.el.classList.toggle('hovered', e.body.id === id);
   }
 
-  /** 光标是否落在某个标签的文字块上 */
+  /** Whether the cursor is over a label's text box */
   hitTest(px, py) {
     for (const p of this.placed) {
       if (px >= p.x0 && px <= p.x1 && py >= p.y0 && py <= p.y1) return p.body;
@@ -82,7 +83,7 @@ export class LabelLayer {
         this.hide(entry);
         continue;
       }
-      // 卫星：和母天体在屏幕上贴太近就不标
+      // Skip a moon's label when it sits too close to its primary on screen
       if (b.parent && b.parent.def.parent) {
         const p = b.parent.screen;
         const sep = Math.hypot(s.x - p.x, s.y - p.y);
@@ -94,7 +95,7 @@ export class LabelLayer {
       candidates.push(entry);
     }
 
-    // 重要的先占位；同级里屏幕更大的优先
+    // Important bodies claim space first; within a tier, the larger on screen wins
     candidates.sort((a, b) => {
       const d = PRIORITY[a.body.kind] - PRIORITY[b.body.kind];
       return d !== 0 ? d : b.body.screen.px - a.body.screen.px;
@@ -102,7 +103,7 @@ export class LabelLayer {
 
     for (const entry of candidates) {
       const s = entry.body.screen;
-      // 标签挂在天体右侧，大天体则贴着圆面边缘
+      // The label hangs to the right of the body, clearing the disc edge for large ones
       const offX = Math.min(Math.max(6, s.px * 0.75), 46);
       const x = s.x + offX;
       const y = s.y;

@@ -2,23 +2,25 @@ import { Texture, SRGBColorSpace, LinearSRGBColorSpace, TextureLoader } from 'th
 import { TEXTURE_MAX_WIDTH } from '../config.js';
 
 /**
- * 真实纹理加载。
+ * Real texture loading.
  *
- * 素材里不少是 8192×4096 的 jpg，解码后每张要 8192*4096*4 ≈ 134 MB 显存，
- * 十来张就上 GB 了。所以统一在**解码阶段**降采样到 TEXTURE_MAX_WIDTH
- * （createImageBitmap 的 resizeWidth 是离线程做的，比 <img>+canvas 快很多）。
- * 想要更高清就调大 config.js 里那个常量，然后重跑 scripts/build-textures.mjs。
+ * Many of the source images are 8192x4096 jpgs, and each one costs 8192*4096*4 bytes, about
+ * 134 MB of VRAM, once decoded; a dozen of them runs past a gigabyte. Everything is therefore
+ * downsampled to TEXTURE_MAX_WIDTH during decode, where createImageBitmap's resizeWidth does
+ * the work off-thread and beats an <img> plus canvas by a wide margin.
+ * For sharper surfaces raise the constant in config.js and re-run scripts/build-textures.mjs.
  */
 
 /* global __TEX_MAP__ */
 /**
- * 构建期生成的「原始文件名 → 派生文件名」映射（见 vite.config.js）。
- * 生产构建里纹理已经被缩到 TEXTURE_MAX_WIDTH 并转成 webp，文件名跟着变；
- * 开发时这张表是空的，直接用 solar_textures/ 下的原图。
+ * Build-time map from original filename to derived filename, produced by vite.config.js.
+ * A production build has already shrunk the textures to TEXTURE_MAX_WIDTH and converted them
+ * to webp, so the names change with them. In development the map is empty and the originals
+ * under solar_textures/ are used directly.
  */
 const TEX_MAP = __TEX_MAP__;
 
-/** 只在真正发请求前替换，缓存键仍用 bodies.js 里写的原始 url */
+/** Substituted only at request time; cache keys still use the original url from bodies.js */
 export function resolveTextureUrl(url) {
   const i = url.lastIndexOf('/');
   const mapped = TEX_MAP[url.slice(i + 1)];
@@ -32,7 +34,7 @@ async function decodeScaled(url, maxWidth) {
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const blob = await res.blob();
 
-  // three 对 ImageBitmap 不做 flipY，这里在解码时就翻好，并把 texture.flipY 关掉
+  // three does not flip ImageBitmaps, so flip during decode and turn texture.flipY off
   let bmp = await createImageBitmap(blob, { imageOrientation: 'flipY' });
   if (bmp.width > maxWidth) {
     const w = maxWidth;
@@ -48,7 +50,7 @@ async function decodeScaled(url, maxWidth) {
   return bmp;
 }
 
-/** @param {'srgb'|'linear'} colorSpace 颜色贴图用 srgb；当数据用（云层 alpha）用 linear */
+/** @param {'srgb'|'linear'} colorSpace srgb for colour maps, linear for data such as cloud alpha */
 export async function loadTexture(url, colorSpace = 'srgb', maxWidth = TEXTURE_MAX_WIDTH) {
   const key = `${url}|${colorSpace}|${maxWidth}`;
   if (cache.has(key)) return cache.get(key);
@@ -58,10 +60,10 @@ export async function loadTexture(url, colorSpace = 'srgb', maxWidth = TEXTURE_M
     try {
       const bmp = await decodeScaled(url, maxWidth);
       tex = new Texture(bmp);
-      tex.flipY = false; // 已在解码时翻好
+      tex.flipY = false; // already flipped during decode
     } catch (err) {
-      // createImageBitmap 不可用 / 取不到 blob 时退回原始尺寸加载
-      console.warn(`[helios] ${url} 降采样加载失败，退回原始尺寸`, err);
+      // Fall back to a full-size load when createImageBitmap is unavailable or the blob fails
+      console.warn(`[helios] ${url} failed to load downsampled, falling back to full size`, err);
       tex = await new TextureLoader().loadAsync(resolveTextureUrl(url));
     }
     tex.colorSpace = colorSpace === 'srgb' ? SRGBColorSpace : LinearSRGBColorSpace;
@@ -75,8 +77,8 @@ export async function loadTexture(url, colorSpace = 'srgb', maxWidth = TEXTURE_M
 }
 
 /**
- * 预加载天体表里声明的全部真实纹理。
- * @returns {Promise<Map<string, Texture>>} key 为 `url|colorSpace`
+ * Preload every real texture declared in the body table.
+ * @returns {Promise<Map<string, Texture>>} keyed by `url|colorSpace`
  */
 export async function preloadBodyTextures(bodies, onProgress) {
   /** @type {{url:string, colorSpace:string}[]} */
@@ -95,7 +97,7 @@ export async function preloadBodyTextures(bodies, onProgress) {
 
   const out = new Map();
   let done = 0;
-  // 并发但限流，免得同时解十几张 8K 图把内存顶穿
+  // Concurrent but throttled, so a dozen 8K decodes cannot blow out memory at once
   const LANES = 3;
   await Promise.all(
     Array.from({ length: LANES }, async () => {
@@ -104,7 +106,7 @@ export async function preloadBodyTextures(bodies, onProgress) {
         try {
           out.set(job.key, await loadTexture(job.url, job.colorSpace));
         } catch (err) {
-          console.warn(`[helios] 纹理加载失败：${job.url}`, err);
+          console.warn(`[helios] failed to load texture: ${job.url}`, err);
         }
         onProgress?.(++done, done + jobs.length, job.url);
       }
@@ -113,7 +115,7 @@ export async function preloadBodyTextures(bodies, onProgress) {
   return out;
 }
 
-/** 从预加载结果里取图；取不到返回 null，调用方回退到程序化材质 */
+/** Fetch a preloaded texture; null means the caller should fall back to a procedural material */
 export function pickTexture(assets, url, colorSpace = 'srgb') {
   if (!url) return null;
   return assets.get(`${url}|${colorSpace}`) ?? null;

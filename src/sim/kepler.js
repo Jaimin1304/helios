@@ -2,11 +2,12 @@ import { Vector3, Matrix3 } from 'three';
 import { DEG, OBLIQUITY } from '../config.js';
 
 /**
- * 解开普勒方程 M = E - e·sinE，牛顿迭代（高偏心率用更稳的初值）。
- * @param {number} M 平近点角(rad) @param {number} e 偏心率
+ * Solve Kepler's equation M = E - e*sinE by Newton iteration, with a sturdier initial guess
+ * at high eccentricity.
+ * @param {number} M mean anomaly in radians @param {number} e eccentricity
  */
 export function solveKepler(M, e) {
-  // 归一化到 [-π, π)
+  // Normalise into [-pi, pi)
   M = ((M + Math.PI) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI) - Math.PI;
   let E = e < 0.8 ? M + e * Math.sin(M) : Math.PI * Math.sign(M || 1);
   for (let k = 0; k < 24; k++) {
@@ -20,14 +21,16 @@ export function solveKepler(M, e) {
 }
 
 /**
- * 由 IAU 北极指向（赤道系 RA/Dec，度）构造"母天体赤道系 → 黄道系"的旋转矩阵。
- * 列向量：X = 赤道对黄道的升交点方向，Z = 自转极，Y = Z×X。
+ * Build the rotation from a primary's equatorial frame to the ecliptic, given its IAU north
+ * pole as equatorial RA/Dec in degrees. The columns are X towards the ascending node of the
+ * equator on the ecliptic, Z along the spin pole, and Y = Z cross X.
  */
 /**
- * IAU 的自转基准子午线 W 是从「天体赤道对 **ICRF 赤道** 的升交点」量起的，
- * 而 equatorFrame() 的 X 轴是「对**黄道**的升交点」。两者都在天体赤道面内，
- * 相差一个绕自转轴的常量角，这里把它算出来。
- * @returns {number} 从黄道升交点转到 ICRF 升交点的有向角（弧度，绕自转轴正向）
+ * The IAU prime meridian W is measured from the ascending node of the body's equator on the
+ * ICRF EQUATOR, while the X axis from equatorFrame() points at the ascending node on the
+ * ECLIPTIC. Both lie in the body's equatorial plane and differ by a constant angle about the
+ * spin axis, which this function computes.
+ * @returns {number} signed angle from the ecliptic node to the ICRF node, in radians, positive about the spin axis
  */
 export function iauNodeOffset(poleRaDeg, poleDecDeg) {
   const ra = poleRaDeg * DEG;
@@ -37,7 +40,7 @@ export function iauNodeOffset(poleRaDeg, poleDecDeg) {
     Math.cos(dec) * Math.sin(ra),
     Math.sin(dec),
   );
-  // ICRF 赤道上的升交点：ẑ_eq × pole，仍在赤道系里
+  // Ascending node on the ICRF equator: z_eq cross pole, still in equatorial coordinates
   const nodeEq = new Vector3(-pole.y, pole.x, 0);
   if (nodeEq.lengthSq() < 1e-12) return 0;
   nodeEq.normalize();
@@ -61,20 +64,20 @@ export function iauNodeOffset(poleRaDeg, poleDecDeg) {
 export function equatorFrame(poleRaDeg, poleDecDeg) {
   const ra = poleRaDeg * DEG;
   const dec = poleDecDeg * DEG;
-  // 赤道系笛卡尔
+  // Cartesian in equatorial coordinates
   const xe = Math.cos(dec) * Math.cos(ra);
   const ye = Math.cos(dec) * Math.sin(ra);
   const ze = Math.sin(dec);
-  // 绕 X 轴转 -ε：赤道系 → 黄道系
+  // Rotate by -obliquity about X: equatorial to ecliptic
   const Z = new Vector3(
     xe,
     ye * Math.cos(OBLIQUITY) + ze * Math.sin(OBLIQUITY),
     -ye * Math.sin(OBLIQUITY) + ze * Math.cos(OBLIQUITY),
   ).normalize();
 
-  // 升交点 = ẑ_ecl × Z
+  // Ascending node = z_ecl cross Z
   let X = new Vector3(-Z.y, Z.x, 0);
-  if (X.lengthSq() < 1e-12) X.set(1, 0, 0); // 极点与黄极重合的退化情况
+  if (X.lengthSq() < 1e-12) X.set(1, 0, 0); // degenerate case: the pole coincides with the ecliptic pole
   X.normalize();
   const Y = new Vector3().crossVectors(Z, X).normalize();
 
@@ -82,11 +85,12 @@ export function equatorFrame(poleRaDeg, poleDecDeg) {
 }
 
 /**
- * 预编译一条轨道：把 (Ω, i, ω) 和可选的母天体赤道系合成两个基向量 P、Q，
- * 之后每帧只需 pos = P·x + Q·y（x,y 为轨道平面内坐标）。
+ * Precompile an orbit, folding (node, i, peri) and an optional primary equatorial frame into
+ * two basis vectors P and Q. Each frame then only needs pos = P*x + Q*y, where x and y are
+ * coordinates in the orbital plane.
  *
  * @param {object} el {a(km), e, i(deg), node(deg,Ω), peri(deg,ω), M0(deg), period(days)}
- * @param {Matrix3|null} frame 母天体赤道系→黄道系；null 表示根数已在黄道系
+ * @param {Matrix3|null} frame primary equatorial frame to ecliptic; null means the elements are already ecliptic
  */
 export function compileOrbit(el, frame = null) {
   const i = el.i * DEG;
@@ -108,7 +112,7 @@ export function compileOrbit(el, frame = null) {
     e: el.e,
     b: el.a * Math.sqrt(Math.max(0, 1 - el.e * el.e)),
     M0: el.M0 * DEG,
-    n: (2 * Math.PI) / el.period, // 平均角速度 rad/day
+    n: (2 * Math.PI) / el.period, // mean motion, rad/day
     period: el.period,
     P,
     Q,
@@ -116,8 +120,8 @@ export function compileOrbit(el, frame = null) {
 }
 
 /**
- * 求轨道在历元后 t 天的位置（相对母天体，km，黄道系）。
- * 结果写入 out（THREE.Vector3，内部是 float64，可放心当双精度用）。
+ * Position on the orbit t days after epoch, relative to the primary, in ecliptic km.
+ * The result is written into out; THREE.Vector3 stores float64, so it is safely double precision.
  */
 export function orbitPosition(orbit, tDays, out) {
   const E = solveKepler(orbit.M0 + orbit.n * tDays, orbit.e);
@@ -131,23 +135,24 @@ export function orbitPosition(orbit, tDays, out) {
   return out;
 }
 
-/** 轨道在历元后 t 天的偏近点角 */
+/** Eccentric anomaly on the orbit t days after epoch */
 export function eccentricAnomalyAt(orbit, tDays) {
   return solveKepler(orbit.M0 + orbit.n * tDays, orbit.e);
 }
 
 /**
- * 采样整条轨道椭圆，用于画轨道线。
+ * Sample the whole orbital ellipse for drawing an orbit line.
  *
- * 两个关键处理，都是为了让轨道线**正好穿过天体**：
- *  1. 采样相位从 E0 起步 —— 512 段折线是内接多边形，弦的矢高约 1.88e-5·a，
- *     在海王星轨道上就是 8 万多公里（3 倍海王星半径），肉眼可见地"擦肩而过"。
- *     把第 0 个顶点钉在天体当前位置上，误差就从该点起按二次增长，
- *     等到大到看得见时早就跑出画面了。
- *  2. 以 origin（天体当前的母天体相对位置）为几何原点 —— 否则顶点坐标高达
- *     4.5e6 场景单位，float32 只剩 ~450 km 精度，锚点会带着偏移。
+ * Two details matter, both so the line passes EXACTLY through the body. First, sampling starts
+ * at E0. A 512-segment polyline is an inscribed polygon whose chord sagitta is about 1.88e-5*a,
+ * which on Neptune's orbit is over 80,000 km, roughly three Neptune radii, and the line visibly
+ * misses the planet. Pinning vertex zero to the body's current position makes the error grow
+ * quadratically from there, and by the time it is large enough to see it has left the frame.
+ * Second, origin (the body's current position relative to its primary) becomes the geometry
+ * origin. Without it the vertex coordinates reach 4.5e6 scene units, where float32 resolves
+ * only about 450 km and the anchor carries a visible offset.
  *
- * @returns {Float32Array} 顶点（km，相对 origin）
+ * @returns {Float32Array} vertices in km, relative to origin
  */
 export function sampleOrbit(orbit, segments, E0 = 0, origin = null) {
   const ox = origin ? origin.x : 0;

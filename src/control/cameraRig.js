@@ -9,12 +9,13 @@ const smoothstep = (t) => t * t * (3 - 2 * t);
 const FLY_TMP = new Vector3();
 
 /**
- * 双精度相机机位。**所有状态都以 km 存**，渲染层再做浮动原点转换。
+ * Double-precision camera rig. Every piece of state is stored in km, and the render layer
+ * converts it through the floating origin.
  *
- * 两种模式：
- *  - free  : 枢轴是空间中的一个点。中键平移；右键按下时先把枢轴吸附到
- *            "视口中心射线 ∩ 黄道面"，再绕它转（Blender 风格的转台）。
- *  - focus : 枢轴每帧跟随某个天体。右键绕天体转，滚轮拉近拉远。
+ * Two modes. In free mode the pivot is a point in space: the middle button pans it, and the
+ * moment the right button goes down the pivot snaps to where the view-centre ray meets the
+ * ecliptic, giving a Blender-style turntable. In focus mode the pivot follows a body every
+ * frame, with the right button orbiting it and the wheel dollying in and out.
  */
 export class CameraRig {
   constructor() {
@@ -32,19 +33,19 @@ export class CameraRig {
     this._fwd = new Vector3();
   }
 
-  // ---------- 基向量 ----------
+  // ---------- Basis vectors ----------
   direction(out = new Vector3()) {
     const cp = Math.cos(this.pitch), sp = Math.sin(this.pitch);
     return out.set(cp * Math.cos(this.yaw), cp * Math.sin(this.yaw), sp);
   }
 
-  /** 相机位置（km，日心黄道系） */
+  /** Camera position in km, heliocentric ecliptic */
   position(out = this._pos) {
     this.direction(out);
     return out.multiplyScalar(this.dist).add(this.pivot);
   }
 
-  /** 视线方向（单位向量，由相机指向枢轴） */
+  /** View direction, a unit vector pointing from the camera towards the pivot */
   forward(out = this._fwd) {
     return this.direction(out).negate();
   }
@@ -62,7 +63,7 @@ export class CameraRig {
     return this.mode === 'flying';
   }
 
-  // ---------- 交互 ----------
+  // ---------- Interaction ----------
   pan(dx, dy, viewportHeight) {
     if (this.mode !== 'free') return;
     const k = (2 * this.dist * Math.tan((FOV * DEG) / 2)) / viewportHeight;
@@ -74,7 +75,7 @@ export class CameraRig {
     const k = 0.0052;
     this.yaw -= dx * k;
     this.pitch = clamp(this.pitch + dy * k, -MAX_PITCH, MAX_PITCH);
-    // 保持 yaw 在 [-π, π)，避免长时间拖拽后浮点变大
+    // Keep yaw inside [-pi, pi) so a long drag cannot inflate the float
     if (this.yaw > Math.PI) this.yaw -= 2 * Math.PI;
     else if (this.yaw < -Math.PI) this.yaw += 2 * Math.PI;
   }
@@ -88,8 +89,9 @@ export class CameraRig {
   }
 
   /**
-   * 把枢轴吸附到「视口中心正交射线 ∩ 黄道面(z=0)」。
-   * 相机位置保持不动，只改变枢轴与距离（视线方向不变，故 yaw/pitch 不用重算）。
+   * Snap the pivot to where the view-centre ray meets the ecliptic plane (z = 0).
+   * The camera itself does not move: only the pivot and distance change, and since the view
+   * direction is unchanged, yaw and pitch need no recomputation.
    */
   snapPivotToEcliptic() {
     if (this.mode !== 'free') return false;
@@ -97,34 +99,35 @@ export class CameraRig {
     const dir = this.forward(new Vector3());
     if (Math.abs(dir.z) < 1e-7) return false;
     const t = -cam.z / dir.z;
-    if (!(t > FREE_DIST_MIN) || t > FREE_DIST_MAX) return false; // 交点在身后或远到没意义
+    if (!(t > FREE_DIST_MIN) || t > FREE_DIST_MAX) return false; // behind the camera, or uselessly far
     this.pivot.copy(cam).addScaledVector(dir, t);
     this.dist = t;
     return true;
   }
 
   /**
-   * 计算一个"好看"的到位机位：停在天体的向阳侧、偏开一点，
-   * 于是抵达时看到的是明暗界线漂亮的凸相，而不是漆黑的夜半球。
+   * Pick a flattering arrival pose: park slightly off to the sunlit side of the body so that
+   * what greets you on arrival is a gibbous phase with a clean terminator rather than an
+   * unlit hemisphere.
    */
   arrivalAngles(body) {
     const p = body.position;
     const r = Math.hypot(p.x, p.y);
-    if (r < 1) return { yaw: this.yaw, pitch: this.pitch }; // 太阳自己
+    if (r < 1) return { yaw: this.yaw, pitch: this.pitch }; // the Sun itself
     return { yaw: Math.atan2(-p.y, -p.x) + 34 * DEG, pitch: 17 * DEG };
   }
 
-  /** 由「相机位置 + 枢轴」反推 dist/yaw/pitch */
+  /** Recover dist/yaw/pitch from a camera position and pivot */
   setFromCameraAndPivot(cam, pivot) {
     const dx = cam.x - pivot.x, dy = cam.y - pivot.y, dz = cam.z - pivot.z;
     const len = Math.hypot(dx, dy, dz);
-    if (len < 1e-9) return; // 退化，保持上一帧朝向
+    if (len < 1e-9) return; // degenerate; keep last frame's orientation
     this.dist = len;
     this.yaw = Math.atan2(dy, dx);
     this.pitch = clamp(Math.asin(dz / len), -MAX_PITCH, MAX_PITCH);
   }
 
-  /** 飞抵并聚焦某个天体 */
+  /** Fly to a body and focus on it */
   flyTo(body, instant = false) {
     const targetDist = Math.max(body.radius * 4.2, body.radius + 12);
     const aim = this.arrivalAngles(body);
@@ -139,9 +142,10 @@ export class CameraRig {
       return;
     }
 
-    // 终点机位：天体向阳侧、距离 targetDist 处。
-    // 存成"相对天体的偏移"而不是绝对坐标——时间在流逝，天体一直在动，
-    // 存绝对坐标的话飞到时早就偏出去了（1440× 下地球 2 秒能跑 14 万 km）。
+    // Destination pose: sunlit side of the body, targetDist away. It is stored as an offset
+    // relative to the body rather than an absolute position, because time keeps running and
+    // the body keeps moving. At 1440x, Earth covers 140,000 km in the two seconds a flight
+    // takes, which is several times the arrival distance.
     const cp = Math.cos(aim.pitch);
     const camEndOffset = new Vector3(
       cp * Math.cos(aim.yaw), cp * Math.sin(aim.yaw), Math.sin(aim.pitch),
@@ -164,7 +168,7 @@ export class CameraRig {
     this.focus = null;
   }
 
-  /** 解除聚焦，回到自由模式（保持当前机位） */
+  /** Release focus and return to free mode, keeping the current pose */
   release() {
     if (this.mode === 'free') return false;
     this.flight = null;
@@ -179,16 +183,18 @@ export class CameraRig {
       f.t = Math.min(1, f.t + dt / f.dur);
       const s = smoothstep(f.t);
 
-      // 机位沿 camStart→camEnd 的**直线**推进；但「离目标还有多远」按指数收缩，
-      // 于是跨 30 AU 和跨 3 万公里的观感速度差不多，也不会在终点前一瞬间糊过去。
+      // The camera advances along the straight line from camStart to camEnd, while the
+      // remaining distance to the target shrinks exponentially. A 30 AU hop and a 30,000 km
+      // hop therefore feel about the same, and neither smears past the target at the end.
       const total = f.L + f.d1;
       const rem = total * Math.pow(f.d1 / total, s) - f.d1;
       const frac = f.L > 1e-9 ? 1 - rem / f.L : 1;
-      f.camEnd.copy(f.body.position).add(f.camEndOffset); // 终点跟着天体走
+      f.camEnd.copy(f.body.position).add(f.camEndOffset); // the destination tracks the body
       FLY_TMP.copy(f.camStart).lerp(f.camEnd, frac);
 
-      // 枢轴在起飞的头一小段就滑到目标天体上，之后全程锁定它——
-      // 于是"飞行途中镜头一直看着目标"，而不是快到了才转过去。
+      // The pivot slides onto the target during the first stretch of the flight and stays
+      // locked there, so the camera watches the target the whole way in rather than
+      // swinging round to face it on arrival.
       const aim = FLIGHT_AIM_LOCK > 0
         ? smoothstep(Math.min(1, f.t / FLIGHT_AIM_LOCK))
         : 1;
@@ -200,7 +206,7 @@ export class CameraRig {
         this.flight = null;
       }
     } else if (this.mode === 'focus' && this.focus) {
-      this.pivot.copy(this.focus.position); // 天体在动时相机跟着走
+      this.pivot.copy(this.focus.position); // follow the body as it moves
       const min = this.focus.radius * FOCUS_MIN_DIST_FACTOR;
       if (this.dist < min) this.dist = min;
     }

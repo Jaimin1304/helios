@@ -1,5 +1,6 @@
-/* 极简 / 极客风：等宽字体、零圆角、发丝级描边、不用毛玻璃。
-   界面只做两件事——把数字说清楚，然后让开画面。 */
+/* Minimal, terminal-flavoured styling: monospace throughout, no rounded corners, hairline
+   borders and no frosted glass. The interface has two jobs, stating the numbers clearly and
+   then getting out of the way of the view. */
 :root {
   --fg: #d5dbe3;
   --dim: #69737f;
@@ -34,7 +35,7 @@ html, body {
 }
 #view.grabbing { cursor: grabbing; }
 
-/* ---------- 天体标签 ---------- */
+/* ---------- Body labels ---------- */
 #labels,
 #gridticks {
   position: fixed;
@@ -60,8 +61,8 @@ html, body {
   letter-spacing: 0.06em;
   color: var(--tc, #9aa5b1);
   text-shadow: 0 0 6px #000, 0 0 3px #000, 0 1px 2px #000;
-  /* 不吃鼠标事件：悬停在标签上不能妨碍平移/旋转/缩放，
-     点击改由画布侧的 hitTest() 在屏幕空间处理 */
+  /* Labels take no mouse events, because hovering one must never interfere with panning,
+     orbiting or zooming. Clicks are resolved by hitTest() against the canvas in screen space. */
   pointer-events: none;
   transform-origin: 0 50%;
   transition: background-color 0.12s, box-shadow 0.12s;
@@ -76,7 +77,7 @@ html, body {
 .tag.k-minor { font-size: 10px; }
 .tag.k-star { font-size: 12px; }
 
-/* 拉格朗日点标签 */
+/* Lagrange point labels */
 .lpoint {
   position: absolute;
   left: 0;
@@ -91,7 +92,7 @@ html, body {
   user-select: none;
 }
 
-/* 黄道面坐标系的 AU 刻度 */
+/* AU ticks on the ecliptic frame */
 .gridtick {
   position: absolute;
   left: 0;
@@ -119,7 +120,7 @@ html, body {
 }
 #hud > * { pointer-events: auto; }
 
-/* H = 收起全部界面，只留 HELIOS 标志 */
+/* H collapses the whole interface, leaving only the HELIOS mark */
 #hud.ui-hidden > *:not(#topbar) { display: none !important; }
 #hud.ui-hidden #topbar > *:not(.brand) { display: none !important; }
 
@@ -208,7 +209,7 @@ kbd {
   color: var(--fg);
 }
 
-/* ---------- 载入 ---------- */
+/* ---------- Loading ---------- */
 #loading {
   position: fixed;
   inset: 0;

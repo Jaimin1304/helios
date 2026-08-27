@@ -1,12 +1,14 @@
 /**
- * 中英双语 / Bilingual strings.
+ * Bilingual strings, Chinese and English.
  *
- * 语言在启动时定一次就不再变：整套 UI（包括天体名）都从这里取字符串，
- * 运行时切换意味着要重建标签层、拉格朗日点标签和已量好的标签宽度，不值得。
+ * The language is decided once at startup and never changes. Every string in the interface,
+ * body names included, is read from here, and switching at runtime would mean rebuilding the
+ * label layer, the Lagrange labels and every measured label width, which is not worth it.
  *
- * 判定规则：浏览器首选语言是中文（zh-*）→ 中文，其余一律英文。
- * 繁体（zh-TW / zh-HK）虽然不是简体，但读简体仍远比读英文自然，所以归中文。
- * `?lang=en` / `?lang=zh` 可强制覆盖，方便截图与分享。
+ * A browser preference of zh-* selects Chinese and anything else selects English. Traditional
+ * Chinese (zh-TW, zh-HK) also maps to Chinese, since reading simplified is far closer than
+ * reading English. ?lang=en and ?lang=zh force the choice, which helps for screenshots and
+ * for sharing a link.
  */
 
 function detect() {
@@ -53,7 +55,7 @@ const ZH = {
   millionKm: (v) => `${v} 百万 km`,
   thousandKm: (v) => `${v} 千 km`,
 
-  // 与 config.js 的 TIME_SCALES 一一对应
+  // Matches TIME_SCALES in config.js entry for entry
   timeRates: ['实时', '1 分钟/天', '1 分钟/月', '1 分钟/年'],
 
   gridRect: '方格',
@@ -117,7 +119,7 @@ const EN = {
   millionKm: (v) => `${v}M km`,
   thousandKm: (v) => `${v}k km`,
 
-  // 与 config.js 的 TIME_SCALES 一一对应
+  // Matches TIME_SCALES in config.js entry for entry
   timeRates: ['real time', '1 min/day', '1 min/month', '1 min/year'],
 
   gridRect: 'GRID',
@@ -148,15 +150,15 @@ const EN = {
   loadReady: 'Ready',
 };
 
-/** 当前语言的字符串表。参数化的条目是函数。 */
+/** String table for the active language. Parameterised entries are functions. */
 export const T = LANG === 'zh' ? ZH : EN;
 
-/** 天体显示名：中文用 name，英文用 en。 */
+/** Display name for a body: the Chinese name in Chinese, the English one otherwise. */
 export function bodyName(def) {
   return LANG === 'zh' ? def.name : def.en;
 }
 
-/** 把 index.html 里带 data-i18n 的静态文案替换成当前语言。 */
+/** Replace the static copy marked with data-i18n in index.html with the active language. */
 export function applyStaticStrings() {
   document.documentElement.lang = LANG === 'zh' ? 'zh-CN' : 'en';
   document.title = T.docTitle;

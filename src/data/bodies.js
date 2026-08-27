@@ -1,33 +1,35 @@
 import { AU_KM } from '../config.js';
 
 /**
- * 天体表。半径为平均半径(km)，轨道根数历元 J2000.0。
+ * Body table. Radii are mean radii in km and orbital elements use the J2000.0 epoch.
  *
- * 行星根数用 Standish (JPL, 1800-2050 近似) 的 a/e/i/L/ϖ/Ω 形式，
- * 这里换算成 (Ω, ω=ϖ-Ω, M0=L-ϖ)。
- * 矮行星/小行星用其平均根数；卫星用相对母天体**赤道系**（Laplace 面的近似）
- * 的平均根数——真实卫星轨道有较强摄动，这里取长期平均值，视觉上足够。
- * 卫星的 M0（历元时刻的相位）多为估计值，只影响初始时刻各卫星站在轨道哪一侧。
+ * Planetary elements come from Standish's JPL approximation for 1800-2050 in a/e/i/L/lp/node
+ * form, converted here to (node, peri = lp - node, M0 = L - lp). Dwarf planets and asteroids
+ * use their mean elements. Satellites use mean elements relative to the primary's EQUATORIAL
+ * frame, an approximation of the Laplace plane; real satellite orbits are strongly perturbed,
+ * and these long-term averages are close enough to look right. A satellite's M0, its phase at
+ * epoch, is often an estimate, and it only decides which side of its orbit the moon starts on.
  *
  * kind: star | planet | dwarf | moon | minor
- * style/palette 供程序化贴图生成器使用（后续会被真实纹理替换）。
+ * style and palette feed the procedural texture generator and are unused once a real texture
+ * covers the body.
  */
 
-/** 行星：Standish 形式 → 内部形式 */
+/** Planets: Standish form to internal form */
 function pl(aAU, e, i, L, varpi, node, period) {
   return { a: aAU * AU_KM, e, i, node, peri: varpi - node, M0: L - varpi, period };
 }
-/** 通用：a 以 AU 计（小天体） */
+/** General case, with a in AU (small bodies) */
 function au(a, e, i, node, peri, M0, period) {
   return { a: a * AU_KM, e, i, node, peri, M0, period };
 }
-/** 卫星：a 以 km 计 */
+/** Satellites, with a in km */
 function km(a, e, i, node, peri, M0, period) {
   return { a, e, i, node, peri, M0, period };
 }
 
 export const BODIES = [
-  // ────────────────────────────── 恒星 ──────────────────────────────
+  // ────────────────────────────── Star ──────────────────────────────
   {
     id: 'sun', name: '太阳', en: 'Sun', kind: 'star', radius: 695700,
     pole: [286.13, 63.87], rotHours: 609.12, flattening: 0,
@@ -35,7 +37,7 @@ export const BODIES = [
     tex: { map: './solar_textures/8k_sun.jpg' },
   },
 
-  // ────────────────────────────── 行星 ──────────────────────────────
+  // ────────────────────────────── Planets ──────────────────────────────
   {
     id: 'mercury', name: '水星', en: 'Mercury', parent: 'sun', kind: 'planet', radius: 2439.7,
     pole: [281.0103, 61.4155], rotHours: 1407.6, flattening: 0,
@@ -82,8 +84,9 @@ export const BODIES = [
     style: 'banded', bands: 8,
     palette: ['#8a7345', '#d5bd8a', '#f2e6c6', '#b59a63'],
     tex: { map: './solar_textures/8k_saturn.jpg', ring: './solar_textures/8k_saturn_ring_alpha.png' },
-    // 环带半径按环贴图的 alpha 剖面标定：卡西尼缝落在条带 x≈0.70 处，
-    // 对应真实的 119,875 km，反推出条带两端 = 62,829 / 144,251 km。
+    // Ring radii are calibrated from the alpha profile of the ring texture: the Cassini division
+    // sits at x = 0.70 along the strip, which is the real 119,875 km, and working backwards puts
+    // the strip's ends at 62,829 and 144,251 km.
     rings: { innerKm: 62829, outerKm: 144251, tint: '#d8c9a5' },
     orbit: pl(9.53667594, 0.05386179, 2.48599187, 49.95424423, 92.59887831, 113.66242448, 10759.22),
   },
@@ -105,19 +108,20 @@ export const BODIES = [
     orbit: pl(30.06992276, 0.00859048, 1.77004347, -55.12002969, 44.96476227, 131.78422574, 60189.0),
   },
 
-  // ────────────────────────────── 地球系统 ──────────────────────────────
+  // ────────────────────────────── Earth system ──────────────────────────────
   {
     id: 'moon', name: '月球', en: 'Moon', parent: 'earth', kind: 'moon', radius: 1737.4,
-    // 月球自转轴几乎垂直于黄道面（对黄极仅 1.54°），不能沿用地球赤道系
+    // The Moon's spin axis is nearly perpendicular to the ecliptic, only 1.54 degrees off, so it
+    // cannot inherit Earth's equatorial frame
     pole: [270.0, 66.54],
     rotHours: 655.728, style: 'cratered', craters: 198,
     tex: { map: './solar_textures/8k_moon.jpg' },
     palette: ['#2e2e30', '#5f5f62', '#8b8b8e', '#b9b9bc'],
-    // 月球轨道倾角是相对**黄道**约 5.145°，不走地球赤道系
+    // The Moon's 5.145 degree inclination is measured against the ECLIPTIC, not Earth's equator
     orbit: { ...km(384400, 0.0549, 5.145, 125.08, 318.15, 135.27, 27.321582), frame: 'ecliptic' },
   },
 
-  // ────────────────────────────── 木卫 ──────────────────────────────
+  // ────────────────────────── Moons of Jupiter ──────────────────────────
   {
     id: 'io', name: '木卫一 · 伊奥', en: 'Io', parent: 'jupiter', kind: 'moon', radius: 1821.6,
     style: 'volcanic', palette: ['#8f6a12', '#d8b32c', '#f2e08a', '#a33418'],
@@ -139,7 +143,7 @@ export const BODIES = [
     orbit: km(1882700, 0.0074, 0.192, 0, 52.6, 181.4, 16.689018),
   },
 
-  // ────────────────────────────── 土卫 ──────────────────────────────
+  // ─────────────────────────── Moons of Saturn ───────────────────────────
   {
     id: 'mimas', name: '土卫一 · 弥玛斯', en: 'Mimas', parent: 'saturn', kind: 'moon', radius: 198.2,
     style: 'cratered', craters: 121, palette: ['#5e5e62', '#97979c', '#c2c2c7', '#e2e2e6'],
@@ -176,7 +180,7 @@ export const BODIES = [
     orbit: km(3560820, 0.0286, 15.47, 0, 275.9, 12.0, 79.3215),
   },
 
-  // ────────────────────────────── 天卫 ──────────────────────────────
+  // ─────────────────────────── Moons of Uranus ───────────────────────────
   {
     id: 'miranda', name: '天卫五 · 米兰达', en: 'Miranda', parent: 'uranus', kind: 'moon', radius: 235.8,
     style: 'cratered', craters: 88, palette: ['#4a4a4e', '#7d7d82', '#a5a5ab', '#c6c6cb'],
@@ -203,15 +207,15 @@ export const BODIES = [
     orbit: km(583500, 0.0014, 0.058, 0, 104.4, 279.8, 13.463239),
   },
 
-  // ────────────────────────────── 海卫 ──────────────────────────────
+  // ─────────────────────────── Moons of Neptune ──────────────────────────
   {
     id: 'triton', name: '海卫一 · 特里同', en: 'Triton', parent: 'neptune', kind: 'moon', radius: 1353.4,
     style: 'icy', cracks: 70, palette: ['#7d7480', '#c0b6c2', '#e9e1ea', '#a08f9c'],
-    // 逆行：倾角 >90° 已表达逆行，周期取正
+    // Retrograde: an inclination above 90 degrees already expresses that, so the period stays positive
     orbit: km(354759, 0.000016, 156.885, 0, 344.0, 77.0, 5.876854),
   },
 
-  // ────────────────────────── 矮行星 / 小天体 ──────────────────────────
+  // ──────────────────────── Dwarf planets and small bodies ────────────────────────
   {
     id: 'ceres', name: '谷神星', en: 'Ceres', parent: 'sun', kind: 'dwarf', radius: 469.7,
     rotHours: 9.074, style: 'cratered', craters: 132,
@@ -268,9 +272,10 @@ export const BODIES = [
 ];
 
 /**
- * 主题色：用于轨道线、标签、信息栏标题，以及以后的公转轨迹。
- * 只给"直觉上有明确颜色"的天体单独指定，其余一律用统一的中性灰。
- * 注意这**不是**天体的真实外观色（那是贴图的事），而是识别用的标识色。
+ * Theme colours, used for orbit lines, labels, info panel titles and future orbital trails.
+ * Only bodies with an obvious intuitive colour get their own entry; everything else shares one
+ * neutral grey. These are identification colours rather than a body's true appearance, which
+ * is what the textures are for.
  */
 export const THEME_DEFAULT = '#9aa5b1';
 
@@ -286,20 +291,22 @@ const THEMES = {
   uranus: '#7fdbe8',
   neptune: '#4a7dff',
   pluto: '#d9a98c',
-  // 少数几个自带强烈色彩印象的卫星
-  io: '#f2d24a', // 硫磺黄
-  europa: '#cfe3f2', // 冰蓝白
-  titan: '#f0a02c', // 橙色雾霾
-  enceladus: '#e8f6ff', // 高反照率冰
-  triton: '#d9c0d6', // 淡粉
+  // The handful of moons that carry a strong colour association
+  io: '#f2d24a', // sulphur yellow
+  europa: '#cfe3f2', // icy blue-white
+  titan: '#f0a02c', // orange haze
+  enceladus: '#e8f6ff', // high-albedo ice
+  triton: '#d9c0d6', // pale pink
 };
 
 /**
- * 自转：IAU/WGCCRE 的自转基准子午线 W = W0 + Wdot·d（度，d 为 J2000 起的天数）。
- * W0 是从「天体赤道对 ICRF 赤道的升交点」量起的，而本工程的赤道系 X 轴是
- * 「对**黄道**的升交点」，两者差一个常量角，由 system.js 在建表时算出并补上。
- * 没有列在这里的天体：卫星按潮汐锁定（自转周期 = 公转周期，相位由轨道反解），
- * 其余用 rotHours。
+ * Rotation from the IAU/WGCCRE prime meridian, W = W0 + Wdot * d, in degrees with d counted in
+ * days from J2000. W0 is measured from the ascending node of the body's equator on the ICRF
+ * equator, whereas this project's equatorial X axis points at the ascending node on the
+ * ECLIPTIC. The two differ by a constant angle, which system.js computes and applies at table
+ * build time. Bodies absent from this table fall back to tidal locking for satellites, where
+ * the rotation period equals the orbital period and the phase is solved from the orbit, and to
+ * rotHours for everything else.
  */
 const ROTATION = {
   sun: [84.176, 14.1844000],
@@ -308,7 +315,7 @@ const ROTATION = {
   earth: [190.147, 360.9856235],
   moon: [38.3213, 13.17635815],
   mars: [176.630, 350.89198226],
-  jupiter: [284.95, 870.5360000], // 系统 III
+  jupiter: [284.95, 870.5360000], // System III
   saturn: [38.90, 810.7939024],
   uranus: [203.81, -501.1600928],
   neptune: [253.18, 536.3128492],
@@ -316,8 +323,9 @@ const ROTATION = {
 };
 
 /**
- * 引力常数乘质量 GM（km³/s²），用来算表面重力 g = GM/R²。
- * 大天体取实测值；小卫星和 TNO 多为由质量估计换算，仅供量级参考。
+ * Standard gravitational parameter GM in km^3/s^2, used for surface gravity g = GM/R^2.
+ * Large bodies use measured values; small moons and TNOs are mostly converted from mass
+ * estimates and are good for order of magnitude only.
  */
 const GM = {
   sun: 132712440018, mercury: 22031.87, venus: 324858.592, earth: 398600.4418,

@@ -1,361 +1,385 @@
-# Helios · 真实比例太阳系漫游
+# Helios
 
-纯前端（Three.js + Vite），**1:1 真实尺度**——天体半径、轨道尺寸、轨道倾角全部按真实数据，
-不做任何"为了好看"的缩放。
+A browser tour of the solar system at 1:1 scale. Body radii, orbit sizes and inclinations all
+come from real data, with no "makes it look nicer" fudging anywhere. Pure front end, built on
+Three.js and Vite.
 
 ```bash
 npm install
 npm run dev      # http://localhost:5173
-npm run build    # 输出到 dist/（会自动带上 solar_textures/）
+npm run build    # writes dist/, textures included
 ```
 
-## 纹理流水线
+## Controls
 
-`solar_textures/` 里的素材多是 8192×4096 的 jpg（引用到的 14 张合计 66 MB），
-但运行时 `assets.js` **一律在解码阶段降采样到 `TEXTURE_MAX_WIDTH`（2048）**——
-下载下来的像素有 94% 是直接扔掉的。所以构建时先压一道：
+| Input | Free mode | Focus mode |
+| --- | --- | --- |
+| Middle drag | Pan | Releases focus immediately, then pans |
+| Middle click | — | Release focus |
+| Right drag | Orbit the point where the view-centre ray meets the ecliptic | Orbit the body |
+| Wheel | Exponential zoom | Dolly in and out |
+| Click a body or label | Select; the camera stays put and only the info panel changes | Same |
+| Double-click a body or label | Fly there and focus | Switch target |
+| `G` | Ecliptic frame: off, grid, polar | Same |
+| `L` | Lagrange points, L1 to L5 for every body and its primary | Same |
+| `T` | Time rate: 1x, 1440x, 43200x, 525600x | Same |
+| `H` | Hide or show the whole interface, leaving the HELIOS mark | Same |
+| `O` `N` `F` `Esc` | Orbit lines, labels, focus the selection, exit focus | |
+
+Labels are `pointer-events: none`, so every mouse gesture reaches the canvas and hovering a
+label never blocks panning, orbiting or zooming. Clicking one still works, because picking runs
+in screen space on the canvas side and tries the body's disc, then the label's text box, then
+the dot's hot zone.
+
+Deep links for debugging: `?focus=saturn`, `?dist=45` (AU), `?lang=en` or `?lang=zh`.
+
+## What true scale costs
+
+Three problems fall out of refusing to fudge the scale, and most of the interesting code exists
+to deal with them.
+
+**Precision.** The scene spans about eleven orders of magnitude, from Neptune's orbit at
+4.5e9 km down to a 6 km moon, which float32 cannot represent. Every orbit and every piece of
+camera state is therefore computed in double precision with km as the unit (`src/sim`,
+`src/control/cameraRig.js`). Rendering uses a floating origin: the camera sits permanently at
+`(0,0,0)` and each frame writes every body's position as its offset from the camera times
+`KM_TO_UNITS`. All float32 ever has to express is how far something is from the camera, so
+nearby bodies get the full mantissa. Depth uses `logarithmicDepthBuffer`, with the near plane
+following the closest object each frame.
+
+**Invisibility.** Almost everything is sub-pixel at true scale, so each body has two
+representations that cross-fade by apparent radius. Above 4 px it draws as a real sphere; below
+that a glowing dot of constant screen size takes over (`render/bodyView.js`), with a clickable
+HTML label on top (`render/labels.js`). The label layer declutters by importance, drops a moon
+whose label would collide with its primary, and hides anything a planet stands in front of.
+
+**Lighting range.** Irradiance at Mercury is roughly 6000 times what Neptune receives. The point
+light uses a physical `decay = 2`, and auto-exposure covers part of the rest by driving
+`toneMappingExposure` from the distance between the Sun and whatever the camera is looking at.
+The exponent is 1.88 rather than 2, which leaves the outer system noticeably dimmer without
+going black; `config.js` works through the reasoning. Anything that should hold a fixed
+brightness, such as the starfield, the dots and the solar disc, is marked `toneMapped: false`
+and sits outside the exposure system.
+
+## What is included
+
+The criterion is hydrostatic equilibrium, meaning bodies their own gravity has pulled round.
+That comes to 36: the Sun, the eight planets, 19 round moons (the Moon; Io, Europa, Ganymede,
+Callisto; Mimas, Enceladus, Tethys, Dione, Rhea, Titan, Iapetus; Miranda, Ariel, Umbriel,
+Titania, Oberon; Triton; Charon) and 8 dwarf planets, being the five the IAU recognises plus
+Quaoar, Gonggong and Orcus, which the literature broadly agrees on.
+
+Vesta and Pallas are out because the IAU points to their failure to reach equilibrium as exactly
+why they are not dwarf planets. Hygiea is contested and falls well under the roughly 800 km a
+rocky body needs. Dysnomia has never had its shape measured. Phobos, Hyperion, Phoebe, Nereid,
+Arrokoth and the rest are visibly irregular and would be sub-pixel here regardless.
+
+Sedna is left out for a different reason: it almost certainly is in equilibrium, but its
+semi-major axis of 506.8 AU is ten times everything else in the scene, and one orbit line that
+size wrecks the sense of scale for everything inside it.
+
+## Time
+
+`T` cycles four rates, each a whole multiple of one real minute so the readings stay intuitive.
+
+| Rate | One real minute covers | Good for |
+| --- | --- | --- |
+| `1x` | one minute | Real time; nothing appears to move |
+| `1440x` (default) | one day | Rotation; Earth turns once in about 60 seconds |
+| `43200x` | 30 days | The Moon's orbit, about 55 seconds, and the inner planets |
+| `525600x` | one year | Outer planet orbits |
+
+The top bar shows both the multiplier and what it means, since 43200x on its own says nothing
+about speed. Positions are solved analytically from Kepler elements rather than integrated, so
+fast-forward accumulates no error. The real limit is sampling: at 525600x Earth turns about 37
+degrees per frame and strobes badly, which is aliasing rather than a simulation failure.
+
+Rotation comes from three sources in descending order of confidence (`initSpin()` in
+`system.js`). The IAU/WGCCRE prime meridian `W = W0 + Wdot * d` covers the Sun, the Moon, the
+eight planets and Pluto, with one wrinkle: IAU measures W0 from the ascending node of the body's
+equator on the ICRF equator while this project measures from the node on the ecliptic, so
+`iauNodeOffset()` supplies the constant angle between them. Retrograde rotation then falls out
+of the pole direction on its own, since Pluto has a positive Wdot but a pole south of the
+ecliptic at z = -0.388 and still turns backwards seen from ecliptic north. Tidally locked
+satellites form the second tier, and whatever is left uses `rotHours` with an uncalibrated epoch
+phase, which only decides which face greets you at startup.
+
+## Notes on the parts that fought back
+
+Four things here look like bugs and turn out to be geometry or convention.
+
+**Orbit lines have to pass through their body.** A 512-segment polyline inscribed in an ellipse
+has a chord sagitta of about `1.88e-5 * a`. For Earth that is 2,800 km and invisible; for
+Neptune it is 84,700 km, or 3.4 Neptune radii, and the line sails past the planet in plain view.
+Adding segments does not fix it, since Ceres would need 3,800 and Arrokoth around 100,000. What
+does fix it is aligning the sampling phase to the body's current position and using the body as
+the geometry origin, so vertex zero lands exactly on it and error grows quadratically from a
+point already off screen. That also removes the roughly 450 km float32 offset at 4.5e6 scene
+units. Once bodies move, `OrbitLine.rebuild()` has to run after each position update or the
+anchor drifts.
+
+**Very long line segments get eaten by the rasteriser.** The ecliptic grid originally drew each
+line as a single segment spanning 100 cells. At grazing angles such a segment runs from just in
+front of the camera out to tens of AU, covering several orders of magnitude in depth, and the
+near end simply vanished, leaving one band near the horizon. Disabling depth testing changed
+nothing, which ruled out occlusion. `pushLine()` in `grid.js` now subdivides every line per
+cell, keeping each segment's depth range small, which logarithmic depth interpolation needs
+anyway.
+
+**Tidal locking needs mean motion, not instantaneous angular velocity.** Deriving the spin rate
+from how fast the primary's direction sweeps is wrong, because true anomaly advances unevenly on
+an eccentric orbit and more unevenly still once a high-inclination orbit is projected onto the
+equator. Measured error was 1.2% for Europa and 6.4% for Triton. Using orbital mean motion with
+the direction taken from angular momentum projected onto the spin axis fixes both and makes
+retrograde moons spin backwards with no special case. Libration then emerges on its own: the
+Moon's sub-Earth longitude swings ±6.3 degrees, matching the theoretical 2e of 6.29.
+
+**Surface gravity uses the equatorial radius.** The table stores mean volumetric radius
+`R = Re * (1-f)^(1/3)`, and inverting that recovers Re to better than 0.01% with no extra data.
+Mean radius inflates the gas giants systematically, putting Jupiter at 25.92 against a published
+24.79, while equatorial radius brings every body within 0.2%.
+
+## The Sun
+
+The real Sun outshines the planets by five or six orders of magnitude, which no display can
+reproduce, so the impression has to be assembled from four layers (`bodyView.js`,
+`textures.js`). There is deliberately no post-process bloom, since a full-screen pass fights the
+per-material `toneMapped: false` scheme that holds certain layers at fixed brightness.
+
+The disc gets limb darkening through a short shader patch, fading the edge to 0.34 of centre by
+`mu = N·V`, and is then overdriven 1.55x so the brightest granulation clips to white. That layer
+does most of the work of turning a textured ball into something that reads as a star. A hot halo
+sprite at 2.4 R sits over it.
+
+Veiling glare is the third layer and matters more than the first two. What makes a light source
+painful to look at on film comes mostly from scattering inside the lens or the eye, and that
+haze lifts everything nearby while washing out contrast. The texture is accordingly wide and
+soft, and its strength tracks solar irradiance entering the lens by inverse square, so it floods
+the screen near Earth and has all but vanished beyond Jupiter. It carries `depthTest: false`,
+since haze belongs over the image rather than behind the geometry, though it disappears the
+moment a planet occludes the Sun. Inside 0.05 AU it is dropped entirely, because at that range
+you are almost certainly studying the disc and a screen-wide wash only gets in the way; focusing
+the Sun parks the camera at 0.0195 AU, comfortably inside that threshold.
+
+Last comes the starburst, four long and four short diffraction spikes at a constant screen size.
+Its colour is set past 1.0 at (1.75, 1.62, 1.44), which without bloom is the closest thing to an
+overexposed source. It carries the whole impression once the Sun has receded to a point, and
+fades out inside 2 AU where the disc is well resolved and spikes start to look fake.
+
+Every layer except the glare keeps `depthTest: true`. Their sprite quads pass through the Sun's
+centre, so what the disc occludes is precisely the interior of the circle and the additive light
+appears only beyond the limb, which keeps disc detail sharp and stops a transiting planet from
+being washed out.
+
+## Rings
+
+Rings use a `MeshBasicMaterial` rather than a lit one. Their normal points along the spin axis
+and sunlight arrives at a grazing angle, so a Lambertian model renders them nearly black, while
+real rings come close to the planet's own brightness thanks to strong backscatter. Brightness is
+therefore taken straight from the inverse square of the solar distance and left for
+auto-exposure to compress. Two things are layered on top of that in a small shader patch.
+
+**The planet's shadow.** A ring point is eclipsed when it lies behind the planet along the Sun
+direction and inside its silhouette. Squashing space along the polar axis turns the oblate
+planet into a sphere, and since ring points sit at local z = 0 they are untouched by that
+squash, so only the shadow axis has to carry it. The test is then a cylinder of the planet's
+equatorial radius, and Saturn's works out to 60,268 km against a published 60,268. The Sun is a
+disc rather than a point, so the shadow edge softens with distance behind the planet; at
+120,000 km out the penumbra comes to 59 km, which the shader derives from the Sun's angular
+radius instead of a fudged constant.
+
+**Transmitted light on the shaded face.** Rings are translucent, so from the unlit side what
+reaches the eye is light that came through them. Dense regions go dark while thin ones stay
+comparatively bright, which is the contrast inversion Cassini photographed from Saturn's unlit
+side. The model is `gain * exp(-k * alpha)` against the ring texture's alpha, with the alpha
+channel still doing the occlusion, so the shaded face reads as a faint ghost of the lit one
+rather than disappearing. Setting `RING_TRANSMIT` to 0 blanks it entirely instead.
+
+Which face is lit is decided on the CPU and passed in as `uLitFacing`. Deriving it in the
+shader from `gl_FrontFacing` is a trap: `RingGeometry` reports front-facing when viewed from its
+local **-Z**, the opposite of what its +Z normals suggest, which silently swaps the lit and
+shaded sides. The ring also fades out over the last 1.7 degrees before edge-on, where a
+zero-thickness disc covers almost no pixels anyway.
+
+Which face is lit follows the real season. Saturn passed equinox in May 2025, so the simulation
+puts the sub-solar ring latitude at -7.1 degrees in August 2026 and deepening, leaving the
+southern face lit into the 2030s. Rotating more than about eight degrees above the ecliptic on
+the sunward side therefore crosses the ring plane and brings you round to the shaded face, which
+is correct geometry rather than a bug.
+
+Still missing: the rings cast no shadow onto the planet, and the shadowed part of the rings
+receives no Saturnshine, so it goes fully black rather than very dark.
+
+## The belts
+
+`render/belts.js` draws the asteroid and Kuiper belts as 105,000 particles in two draw calls.
+They are decorative: not `Body` instances, absent from picking, unlabelled.
+
+Each particle carries its own orbital elements and **solves Kepler's equation in the vertex
+shader**, so they genuinely orbit with individual periods and develop differential rotation on
+their own. The main belt runs 2.05 to 3.30 AU, peaks around 2.7 to 3.0 AU, and has five Kirkwood
+gaps carved out by rejection sampling at the resonances with Jupiter; density at 2.50 AU comes
+out at 21% of the peak. Mean e of 0.14 and i of 10 degrees give it real thickness. The Kuiper
+belt mixes 25% Plutinos clustered at 39.4 AU, 60% near-circular cold classicals between 42 and
+47.5 AU, and 15% hot classicals, with the Kuiper cliff at 48 AU.
+
+A real asteroid is far below one pixel at any distance, so each is drawn as a dot of exactly one
+device pixel. The whole-number size is not incidental. GL rasterises a point as a square of side
+`gl_PointSize` centred on the point, generating a fragment for every pixel whose centre that
+square covers, so a side of 1.6 covers one, two or four centres depending on sub-pixel position
+and an asteroid's brightness jumps by up to 4x as it drifts. That reads as aliasing rather than
+twinkling, while a whole-number side always covers n² pixels and holds steady. The code uses
+`round(dpr)` rather than a hard-coded 1.0, because `gl_PointSize` counts device pixels and on a
+2x display one device pixel is half a CSS pixel, which visibly thins the belt.
+
+Two fades in `Belt.update()` are necessary. The first drops the belts once the view scale falls
+far below the belt itself, since beside a planet you would see nothing and a screenful of dots
+is only noise. The second normalises by screen area: the dots hold a constant pixel size, so as
+the belt shrinks its total flux stays put while brightness per unit area climbs as 1/area, and
+additive blending turned it into an overexposed blob at 95 AU. Multiplying by the area ratio
+restores the faint ring it should be.
+
+## Lagrange points
+
+`L` shows all five points of the two-body system each body forms with its primary, tracked live
+(`render/lagrange.js`).
+
+The three collinear points depend only on the mass ratio `mu = m2/(m1+m2)`, which makes them
+constants: solve once at table build time, then each frame apply the current direction and
+separation. The solve uses the dimensionless form in the rotating frame,
+
+```
+f(x) = x − (1−mu)·(x+mu)/|x+mu|³ − mu·(x−1+mu)/|x−1+mu|³ = 0
+```
+
+whose three roots lie in `(−mu, 1−mu)`, `(1−mu, +inf)` and `(−inf, −mu)`. Since f changes sign
+across each interval, plain bisection converges unconditionally, and running once at build time
+makes its slowness against Newton irrelevant.
+
+Do not substitute the Hill radius approximation `(mu/3)^(1/3)`. For the Earth-Moon system at
+mu = 0.0122 it gives 61,300 km against an exact 58,020 km, an error of 5%.
+
+L4 and L5 form equilateral triangles with the two bodies, so rotating the primary-to-secondary
+direction by ±60 degrees about the orbit normal `P × Q` handles retrograde orbits correctly with
+no special case. Measured against published figures, and with the differences entirely explained
+by the ratio of instantaneous to mean orbital radius, Earth-Moon L1 comes out at 60,499 km
+against 58,020 scaled by 400,833/384,400, or 60,500; Sun-Earth L1 gives 1,507,674 km against a
+published 1.5e6; and L4's distances to both bodies agree to 1.000000 at 60.000 degrees.
+
+L1 to L3 are unstable saddle points while L4 and L5 are stable for mu < 0.0385, where Jupiter's
+Trojans collect, so the two families are coloured differently. A group whose orbit is under
+90 px on screen is hidden, since all five points would otherwise pile onto the primary, and the
+top bar reports how many groups are visible so a zoomed-out press of `L` does not look broken.
+
+## Interface
+
+The language is decided once at startup from the browser preference, with `zh-*` selecting
+Chinese and anything else English (`src/i18n.js`). Traditional Chinese maps to Chinese as well,
+since reading simplified is far closer than reading English, and `?lang=en` or `?lang=zh`
+overrides the choice. Every string including body names is read at table build time, so
+switching at runtime would mean rebuilding the label layer and re-measuring every label width.
+Both names live side by side in the `name` and `en` fields of `data/bodies.js` and `Body.name`
+picks one, which keeps the labels, info panel and Lagrange overlay unaware of the question.
+
+The styling is monospace throughout, with square corners, hairline borders and no frosted glass.
+Numbers use `tabular-nums` so readings do not jitter as they change, and a single accent colour
+is defined; the rest of the colour in view belongs to the bodies. Each body carries a `theme`
+colour driving its orbit line, label and info panel title, assigned only where there is an
+obvious intuitive choice and otherwise left at a neutral grey. These identify rather than
+describe, so a distant dot keeps its real colour and ignores the theme.
+
+`H` collapses the interface down to the HELIOS mark, for screenshots and for watching. Body
+labels are unaffected, since they belong to the scene and have their own toggle on `N`.
+
+## Coordinates
+
+J2000 ecliptic with +Z towards ecliptic north, which makes the ecliptic plane `z = 0` and the
+reference plane for free mode. `G` cycles off, rectangular and polar, starting off. Cells are
+fixed at 1 AU out to ±50 AU with a major line every 10 AU, and all four half-axes carry unsigned
+AU ticks, since they serve as a distance reference. Readings thin first by on-screen cell size,
+choosing 1, 5 or 10 AU, then again by the gap between adjacent labels per half-axis, because
+perspective crowds distant ticks together.
+
+Planetary elements come from Standish's approximation. Satellite elements are expressed in the
+primary's equatorial frame built from IAU pole RA/Dec, with the Moon as the exception since it
+is inclined 5.145 degrees to the ecliptic. Satellite `M0` values are frequently estimates.
+
+## Textures
+
+The art in `solar_textures/` is mostly 8192x4096 jpg, about 66 MB across the 14 files actually
+referenced, while `assets.js` downsamples everything to `TEXTURE_MAX_WIDTH` (2048) during decode
+at runtime. Roughly 94% of every downloaded pixel was being discarded, so
+`scripts/build-textures.mjs` shrinks them at build time and converts to webp.
 
 ```bash
-npm run textures            # 手动跑；vite build 会自动调用
-npm run textures -- --force # 忽略缓存全部重压（约 5 秒）
+npm run textures            # vite build calls this automatically
+npm run textures -- --force # ignore the cache and re-encode, about 5 seconds
 ```
 
-`scripts/build-textures.mjs` 扫 `src/` 找出真正被引用的纹理，缩到目标宽度、转成
-webp，产物落在 `.textures/`（已 gitignore），构建时拷进 `dist/solar_textures/`。
-
-| | 原始 | 派生 |
+| | Original | Derived |
 | --- | --- | --- |
-| 14 张纹理 | 66.28 MB | **2.49 MB**（26.6×） |
-| 整个 `dist/` | ~67 MB | **2.9 MB** |
+| 14 referenced textures | 66.28 MB | 2.49 MB (26.6x) |
+| Whole `dist/` | ~67 MB | 2.9 MB |
 
-**画质是零损失的**，因为运行时看到的本来就是 2048 宽的图。实测同机位同时刻的
-A/B 像素对比：地球平均差 0.64/255、土星 0.14/255、月球 0.77/255，
-差值超过 8 的通道占比 < 0.42%——全部来自 webp q82 与原 jpg 各自的有损伪影。
+Quality is unchanged, because 2048 wide is what the runtime was showing all along. An A/B pixel
+comparison at matched camera and time gives a mean absolute difference of 0.64/255 for Earth and
+0.14 for Saturn, all of it from webp q82 and the source jpg's own artefacts.
 
-三个要点：
+The original 8K art stays untouched, so raising `TEXTURE_MAX_WIDTH` later only needs a re-run.
+The sky is the one width exception, since `sky.js` bypasses `assets.js` and uses whatever it
+loads: a 50 degree field spans only a seventh of the image, so even 8192 is barely 1:1 sampling
+and 2048 goes visibly soft. That image is mostly black, so 8192 in webp costs 0.30 MB, less than
+the 1.82 MB jpg it replaces. Anything carrying alpha is encoded losslessly, because the Saturn
+ring strip's alpha is data rather than appearance and lossy compression bands the edge of the
+Cassini division.
 
-- **原始 8K 素材保留不动**。以后想调高 `TEXTURE_MAX_WIDTH`，重跑一次脚本即可。
-- **天球是唯一的例外**。`sky.js` 不走 `assets.js`，加载多大就用多大，而且铺满整个
-  背景——50° 视场横跨的只有全图的 1/7，8192 宽也才勉强够 1:1 采样。所以
-  `WIDTH_OVERRIDE` 让它保持 8192。好在那张图大半是黑的，8192 的 webp 只要
-  0.30 MB，比原来的 1.82 MB jpg 还小。
-- **带 alpha 的走无损**。土星环条带的 alpha 是**数据**不是外观，有损压缩会在
-  卡西尼缝边缘糊出条带。它本来也只有几十 KB。
+Development serves the originals directly, so edits take effect immediately. Filenames change
+from `.jpg` to `.webp` along the way, handled by a map injected at build time and applied by
+`resolveTextureUrl()` just before the fetch; in development that map is empty.
 
-开发时不受影响：`vite dev` 直接用 `solar_textures/` 下的原图，改素材立刻生效。
-文件名从 `.jpg` 变成 `.webp` 这件事由构建期注入的映射表处理，
-`assets.js` 的 `resolveTextureUrl()` 在 fetch 前换掉，开发时那张表是空的。
+Two smaller details. Decoding goes through `createImageBitmap`'s `resizeWidth`, which runs
+off-thread and comfortably beats `<img>` plus canvas, and without it each 8192x4096 image costs
+about 134 MB of VRAM. Earth's night side needed a shader patch, since three's built-in
+`emissiveMap` adds unconditionally and would glow in daylight, so a mask built from the sun
+angle restricts it to beyond the terminator.
 
-## 部署（GitHub Pages）
+## Deployment
 
-`.github/workflows/deploy.yml` 已经配好：推到 `main` 就自动构建发布。
-仓库里只需设置一次：**Settings → Pages → Source 选 “GitHub Actions”**。
+`.github/workflows/deploy.yml` builds and publishes on every push to `main`. The repository
+needs one setting: **Settings → Pages → Source → GitHub Actions**.
 
-`vite.config.js` 里 `base: './'` 是相对路径，所以放在
-`user.github.io/helios/` 这种子路径下不用改任何配置。
+`base: './'` keeps every path relative, so a project subpath such as `user.github.io/helios/`
+works without configuration. The site is entirely self-contained and makes no external requests,
+which matters for access from mainland China, where a single blocked `fonts.googleapis.com` is
+enough to stall a page.
 
-站点完全自包含——没有任何外部域名请求（无 Google Fonts、无 CDN、无统计脚本），
-这在中国大陆是很关键的一点：很多站打不开就是卡在一个 `fonts.googleapis.com` 上。
-
-## 操作
-
-| 输入 | 自由模式 | 聚焦模式 |
-| --- | --- | --- |
-| 中键拖拽 | 平移视角 | 立即解除聚焦，并当场接着平移 |
-| 中键单击 | — | 解除聚焦 |
-| 右键拖拽 | 绕「视口中心射线 ∩ 黄道面」的交点旋转 | 绕天体旋转 |
-| 滚轮 | 指数缩放 | 拉近/拉远 |
-| 单击天体或标签 | 选中（只换右上角简介，不移动相机） | 同左 |
-| 双击天体或标签 | 飞抵并聚焦 | 切换聚焦目标 |
-| `G` | 黄道面坐标系：关 → 方格 → 极坐标 | 同左 |
-| `L` | 拉格朗日点：每个天体与其母天体的 L1~L5 | 同左 |
-| `T` | 时间流逝：1× → 1440× → 43200× → 525600× | 同左 |
-| `H` | 隐藏 / 显示全部界面（只留左上角的 HELIOS 标志） | 同左 |
-| `O` `N` `F` `Esc` | 轨道线 / 天体标签 / 聚焦选中项 / 退出聚焦 |
-
-标签本身 `pointer-events: none`，所有鼠标操作都走画布，悬停在标签上不会挡住平移/旋转/缩放；
-标签的点击是靠画布侧的屏幕空间拾取实现的（三级优先：圆面命中 → 标签文字块 → 光点热区）。
-
-调试用直达链接：`?focus=saturn`、`?dist=45`（AU）、`?lang=en` / `?lang=zh`（强制语言）。
-
-## 真实比例带来的三个硬问题，以及这里的解法
-
-**1. 精度。** 尺度跨度约 10¹¹（海王星轨道 4.5e9 km ↔ 火卫二半径 6 km），float32 完全不够用。
-所以：所有轨道、相机状态一律用 **双精度、以 km 为单位** 计算（`src/sim`、`src/control/cameraRig.js`），
-渲染时做 **浮动原点**——相机永远固定在场景原点 `(0,0,0)`，每帧把每个天体的位置写成
-「相对相机的差值 × `KM_TO_UNITS`」再交给 three.js。这样 float32 只需要表示"离相机多远"，
-近处天体自然拿到全部精度。深度用 `logarithmicDepthBuffer`，近裁面每帧跟着最近物体走。
-
-**2. 看不见。** 真实比例下绝大多数天体是亚像素的。每个天体都有两种表现形式，按视半径平滑切换：
-视半径 > 4 px 画真实球体，< 4 px 淡入一个 **恒定屏幕尺寸的辉光点**（`src/render/bodyView.js`），
-再叠加一层可点击的 **HTML 标签**（`src/render/labels.js`，带按重要度的矩形防重叠、
-卫星贴着母星时自动隐藏、被行星挡住时自动隐藏）。拾取走屏幕空间：先判圆面命中，再判标签热区。
-
-**3. 光照动态范围。** 太阳到水星和到海王星的辐照度差约 6000 倍。点光源用真实的 `decay = 2` 平方反比，
-再加一层 **自动曝光**（`ACESFilmic` + 按"关注目标到太阳的距离"调 `toneMappingExposure`，
-指数取 1.7 而不是 2，于是外太阳系仍然明显偏暗但不至于全黑）。星空、辉光点、日面都是
-`toneMapped: false`，不受曝光影响，保持恒定亮度。
-
-## 收录范围
-
-只收**流体静力平衡**（自身引力压成球形）的天体，共 36 个：
-
-- 太阳、8 大行星
-- **19 颗浑圆卫星**：月球；木卫一~四；土卫一~五、六、八；天卫一~五；海卫一；冥卫一
-- **8 颗矮行星**：IAU 正式认定的谷神星、冥王星、阋神星、妊神星、鸟神星，
-  加上学界基本无争议的创神星、共工星、亡神星
-
-因未达流体静力平衡而排除：灶神星、智神星（IAU 明确指出这正是它们不算矮行星的原因）、
-健神星（2019 年有观测称接近球形但仍有争议，且远低于岩质天体成球所需的 ~800 km 直径）、
-阋卫一（形状未测定），以及火卫一二、木卫五六、土卫七九、海卫二八、冥卫二三、天涯海角
-这些明显不规则的小天体——真实比例下它们本来也只有亚像素大小。
-
-塞德娜是**按尺度范围**排除的，不是因为不达流体静力平衡：它的半长径 506.8 AU 差不多是
-其余全部天体的 10 倍，一条轨道线就能把整个场景的尺度拉垮。
-
-## 目录
+## Layout
 
 ```
 src/
-  config.js            单位、裁面、曝光、时间倍率等所有可调常量
-  data/bodies.js       天体表：半径 / J2000 轨道根数 / IAU 极点+自转 / GM / 主题色 / 纹理
-  sim/kepler.js        开普勒方程求解、轨道根数 → 位置、赤道系与 IAU 子午线换算
-  sim/system.js        天体层级、位置与自转传播（时间轴入口）
-  control/cameraRig.js 双精度机位：自由 / 聚焦 / 直线飞抵
-  control/input.js     鼠标键盘绑定
-  render/bodyView.js   球体 + 光点 + 星环 + 云层 + 恒星的四层光效
-  render/assets.js     真实纹理加载（解码阶段降采样）
-  render/textures.js   程序化表面与各种精灵贴图
-  render/orbits.js     轨道线（相位锚定在天体上）
-  render/belts.js      小行星带 / 柯伊伯带粒子（顶点着色器里解开普勒方程）
-  render/lagrange.js   拉格朗日点 L1~L5
-  render/grid.js       黄道面坐标系（方格 / 极坐标 + AU 刻度）
-  render/labels.js     DOM 天体标签层
-  render/sky.js        天球（赤道系贴图 → 黄道系摆正）
-  ui/hud.js            模式 / 时钟 / 信息面板 / 载入进度
-  i18n.js              中英双语字符串表与语言判定
+  config.js            units, clip planes, exposure, time rates, every tuning constant
+  i18n.js              bilingual string tables and language detection
+  data/bodies.js       radii, J2000 elements, IAU poles and rotation, GM, theme colours, textures
+  sim/kepler.js        Kepler solver, elements to position, equatorial and IAU meridian conversion
+  sim/system.js        body hierarchy, position and rotation propagation
+  control/cameraRig.js double-precision camera: free, focus, straight-line flight
+  control/input.js     mouse and keyboard bindings
+  render/bodyView.js   sphere, dot, rings, clouds, and the four stellar light layers
+  render/assets.js     real texture loading with downsampling at decode
+  render/textures.js   procedural surfaces and sprite textures
+  render/orbits.js     orbit lines, phase-anchored to the body
+  render/belts.js      asteroid and Kuiper belt particles, Kepler solved in the vertex shader
+  render/lagrange.js   Lagrange points L1 to L5
+  render/grid.js       ecliptic frame, rectangular and polar, with AU ticks
+  render/labels.js     DOM body label layer
+  render/sky.js        celestial sphere
+  ui/hud.js            mode, clock, info panel, loading progress
 scripts/
-  build-textures.mjs   构建期把 8K 素材压成 2048px webp（见「纹理流水线」）
+  build-textures.mjs   build-time 8K to 2048px webp conversion
 .github/workflows/
-  deploy.yml           推 main 自动构建并发布到 GitHub Pages
+  deploy.yml           build and publish to GitHub Pages on push to main
 ```
 
-## 界面与语言
+## Not yet done
 
-**双语**：启动时读一次浏览器首选语言，`zh-*` 走中文、其余一律英文（`src/i18n.js`）。
-繁体（zh-TW / zh-HK）也归中文——读简体仍比读英文自然。`?lang=en` / `?lang=zh` 可强制覆盖。
-语言定了就不再变：天体名、标签层、拉格朗日点标签都在建表时取字符串，
-运行时切换意味着要重建标签层并重新量一遍标签宽度，不值得。
-天体的中英文名都在 `data/bodies.js` 的 `name` / `en` 字段里，`Body.name` 按当前语言取其一，
-上层（标签、信息栏、拉格朗日点）无感。中文界面下信息栏副标题给出英文名，英文界面下留空。
-
-**极简极客风**：全等宽字体、零圆角、1 px 发丝描边、不用毛玻璃，顶栏的各段状态用竖线
-分隔而不是做成胶囊。数字一律 `tabular-nums`，读数跳动时不会左右抖。
-唯一的强调色是 `--accent`；画面里的颜色交给天体主题色，界面本身不抢。
-
-**`H` 收起全部界面**：状态栏、天体信息、操作面板全部隐藏，只留左上角的 HELIOS 标志，
-用于截图和纯观看。天体标签不受影响（它属于场景，有自己的 `N`）。
-
-## 时间与自转
-
-按 `T` 在四档倍率间循环，都取"1 真实分钟"的整倍数，读数才有直觉：
-
-| 倍率 | 1 真实分钟 = | 用来看 |
-| --- | --- | --- |
-| `1×` | 1 分钟 | 实时。地球自转、月球公转都几乎静止 |
-| `1440×`（默认） | 1 天 | 自转：地球约 60 秒转一圈 |
-| `43200×` | 30 天 | 月球公转（约 55 秒一圈）、内行星 |
-| `525600×` | 365 天 | 外行星公转、轨道进动尺度的运动 |
-
-档位表在 `config.js` 的 `TIME_SCALES`，倍率与含义一起显示在顶栏时钟上
-（`… UTC · 43200× · 1 分钟/月`）——光看 43200 / 525600 是读不出快慢的。
-
-倍率驱动 `SolarSystem.advance()`，每帧按开普勒根数重算全部位置和自转角。
-位置是**解析求解**而不是积分，所以快进不会累积误差，任何倍率下的读数都同样准确；
-真正的上限是采样率：525600× 下地球每帧自转约 37°，会明显频闪——那是走样，不是仿真错了。
-时钟从打开页面的真实 UTC 时刻起算。
-
-自转按可信度分三档（`system.js` 的 `initSpin()`）：
-
-1. **IAU/WGCCRE 自转基准子午线** `W = W0 + Ẇ·d`，用于日、月和八大行星、冥王星。
-   注意 IAU 的 W0 是从「天体赤道对 **ICRF 赤道** 的升交点」量起的，而本工程的赤道系
-   X 轴是「对**黄道**的升交点」，两者差一个绕自转轴的常量角，由 `iauNodeOffset()` 补上。
-   逆行由极点朝向自然表达：冥王星的 Ẇ 是正的，但它的极点在黄道面以南（黄道系 z = −0.388），
-   所以从黄北看仍是逆向自转。
-2. **潮汐锁定的卫星**：自转速率 = 轨道**平均**运动，方向由轨道角动量在自转轴上的投影定
-   （海卫一、土卫九因此自动得到逆向自转）。
-   ⚠️ 不能用"指向母星方向的瞬时角速度"去反解——偏心轨道的真近点角速率不均匀，
-   高倾角轨道投影到赤道面后更不均匀，实测欧罗巴偏 1.2%、海卫一偏 6.4%。
-   用平均运动之后，**天平动**会自然浮现：实测月球正对地球的经度在 ±6.3° 间摆动，
-   正是 2e = 6.29° 的理论幅度。
-3. 其余天体用自转周期 `rotHours`，历元相位未校准（只影响初始时刻朝向哪一面）。
-
-贴图的 u = 0.5 对应天体的 0° 经度，在本工程的几何里落在天体局部 +X 方向。
-
-## 半径与表面重力
-
-数据表里的 `radius` 是**平均（体积）半径** `R = Re·(1−f)^(1/3)`，信息栏显示的就是它。
-但扁球体渲染和表面重力都需要**赤道**半径，由上式反解即可，无需额外数据——
-实测与实际值误差 <0.01%（地球 6378.1、木星 71487、天王星 25559、海王星 24764）。
-球体按赤道半径建、再沿极轴压扁 `(1−f)`，得到的正是真实扁球体。
-
-表面重力 `g = GM/Re²`，按通用惯例取赤道处的引力加速度（不含自转离心力）。
-用平均半径会让四颗气态巨行星系统性偏高（木星 25.92 vs 24.79），换成赤道半径后
-全部天体与权威值误差 ≤0.2%。小卫星和 TNO 的 GM 多为质量估算换算，仅供量级参考。
-
-## 太阳的"耀眼"
-
-真实太阳的亮度比行星高 5~6 个数量级，屏幕给不了，只能靠观感堆。这里**没有上后期 bloom**——
-全屏后期管线会和"逐材质 `toneMapped:false` 保持恒定亮度"的曝光体系打架，代价大于收益。
-改成四层叠加（`bodyView.js` + `textures.js`）：
-
-1. **日面临边昏暗**：一小段 shader 补丁，按 `μ = N·V` 把边缘压到中心的 0.34
-   （真实太阳可见光波段约 0.3~0.4），再整体过曝 1.55 倍——最亮的米粒组织削到纯白。
-   球体从"贴了图的球"变成"在发光的星"，主要就靠这一层。
-2. **贴边热晕**（2.4 R）：加法混合的精灵。
-3. **面纱眩光**：电影里"刺眼"的观感其实主要不是天体本身多亮，而是强光在镜头/眼球里
-   散射出的那层雾。所以这层贴图做得又大又软（`GLARE_SPAN_PX`），强度直接跟进入镜头的
-   太阳辐照度走（平方反比）：地球附近铺满大半屏、洗淡对比，木星轨道外基本消失——
-   这正是真实相机的行为。它是唯一一层 `depthTest: false` 的（雾本来就该盖在画面上，
-   而不是被几何体挡住），但被行星挡住时（日食/凌日）会立刻消失。
-   另外抵近到 **0.05 AU 以内**也会撤掉——那个距离上用户多半是在看日面本身，
-   一层洗白整屏的光雾只会挡路（聚焦太阳的默认机位是 0.0195 AU，正好落在里面）。
-4. **星芒**：四长四短的衍射芒，恒定屏幕尺寸（最小 84 px，贴近时跟着日面放大到
-   最多 900 px）。颜色故意设到 1.0 以上（1.75, 1.62, 1.44），核心削白、芒的中间调提亮，
-   这是不上 bloom 时最接近"过曝发光"的手段。
-   远处太阳退成一个点时全靠它撑起"一颗耀眼的星"；但相机进到 **2 AU 以内**会淡出——
-   那时日面已经解析得很大，衍射芒反而显假，观感全部交给面纱眩光。
-
-关键细节：除面纱眩光外，其余几层精灵都 `depthTest: true`。精灵面片过日心，被日面球体
-挡掉的正好是圆面内部，于是叠加光只出现在临边之外——既不糊掉日面细节，凌日的行星也不会
-被光晕冲掉。强度相关的常量集中在 `bodyView.js` 顶部（`GLARE_GAIN`、`GLARE_SPAN_PX`、
-`STAR_OVERDRIVE`、`STAR_FLARE_MIN_AU`），都可以单独调。
-
-## 小行星带与柯伊伯带
-
-`render/belts.js`，两个 `Points`（共 10.5 万粒子，2 个 draw call），**不可交互**——
-它们不是 `Body`，不进拾取集合，也没有标签。
-
-每个粒子带着自己的一套真实轨道根数，**开普勒方程在顶点着色器里解**，
-所以它们是货真价实地在绕日公转，各自周期不同，会自然形成较差转动，
-而不是一张贴图或一个整体旋转的圆环。真实小行星在任何视距下都远小于一个像素，
-所以画成恒定 **1 设备像素**的光点——既最省，也是物理上最诚实的画法。
-
-⚠️ 点的尺寸必须取**整数**设备像素。GL 的 point 光栅化规则是「以点为中心、边长
-`gl_PointSize` 的正方形覆盖到哪些像素中心就生成哪些片元」，所以边长取 1.6 时，
-正方形会随亚像素位置覆盖 1、2 或 4 个像素中心——同一颗小行星的亮度会在 1~4 倍之间跳，
-这是走样闪烁而不是"星星在眨眼"。整数边长恒定覆盖 n² 个像素，亮度稳定。
-之所以不写死 1.0 而用 `round(dpr)`：`gl_PointSize` 的单位是设备像素，
-2 倍屏上 1 设备像素只有半个 CSS 像素，整条带会明显变稀。
-
-结构照真实分布采样，位置关系一眼可辨：
-
-- **主带** 2.05–3.30 AU，密度峰在 2.7~3.0 AU，并按拒绝采样挖出五条
-  **柯克伍德空隙**（与木星的 4:1 / 3:1 / 5:2 / 7:3 / 2:1 平均运动共振）。
-  实测直方图里 2.50 AU 处（3:1）密度只剩峰值的 21%。
-  平均 e≈0.14、i≈10°（瑞利分布），所以它是个有厚度的环面而不是一条线。
-- **柯伊伯带** 三个子群混合：25% 冥族小天体（与海王星 3:2 共振，聚在 39.4 AU，
-  偏心率倾角都更大）、60% 冷经典带（42–47.5 AU，近圆、几乎共面）、15% 热经典带。
-  外缘 48 AU 就是**柯伊伯断崖**。
-
-两处必要的淡出（都在 `Belt.update()`）：
-
-- 镜头尺度远小于带本身时淡出。贴着行星看的时候真实小行星根本不可见，
-  满屏乱撒光点只会变成噪点。
-- **按屏幕面积归一化**。点是恒定像素尺寸的，带被压小时总光通量不变、单位面积亮度却
-  ∝ 1/面积，加法混合下会糊成一坨过曝白斑（拉到 95 AU 时尤其明显）。
-  乘上面积比之后，远看就是"一圈淡淡的环"。
-
-粒子数是 `belts.js` 里每个带的 `count`。SwiftShader 软件光栅下 10.5 万粒子约占 22 ms/帧，
-真实 GPU 上这点顶点量可忽略；显卡弱可以调小。
-
-## 拉格朗日点
-
-按 `L` 显示每个天体与其母天体两体系统的五个点（`render/lagrange.js`），实时跟随。
-
-三个共线点的位置只由质量比 μ = m₂/(m₁+m₂) 决定，是常量，**建表时解一次**即可；
-每帧只需把「母天体→子天体」的方向和距离套上去。解法用旋转坐标系里的无量纲方程
-
-```
-f(x) = x − (1−μ)·(x+μ)/|x+μ|³ − μ·(x−1+μ)/|x−1+μ|³ = 0
-```
-
-三个根分别落在 `(−μ, 1−μ)`、`(1−μ, +∞)`、`(−∞, −μ)` 三段里，每段两端 f 符号相反，
-所以直接二分——比牛顿法慢但绝对收敛，而且只在建表时算一次。
-⚠️ 不要用希尔半径近似 `(μ/3)^(1/3)` 代替：地月系 μ=0.0122 时它给出 61,300 km，
-而精确解是 58,020 km，差 5%。
-
-L4/L5 更简单——它们与两天体构成等边三角形，恒在轨道前后 60°，把「母天体→子天体」
-的方向绕**轨道法向**（`P × Q`，沿运动方向的右手法则）转 ±60° 即可，逆行轨道自动正确。
-
-实测校验（差异全部来自瞬时轨道半径与平均半径之比，折算后与权威值完全一致）：
-地月 L1 = 60,499 km（权威 58,020 km × 400,833/384,400 = 60,500）；
-日地 L1 = 1,507,674 km（权威 1.5e6 km）；L4 到主次星的距离比均为 1.000000、夹角 60.000°。
-
-L1/L2/L3 是不稳定的鞍点，L4/L5 在 μ < 0.0385 时稳定（木星的特洛伊群就聚在那里），
-所以两类用不同颜色。轨道在屏幕上小于 90 px 时整组隐藏，否则五个点会全糊在母天体上；
-顶栏的 chip 会报出当前显示了几组，免得拉远后按 `L` 没反应被当成坏了。
-
-## 主题色
-
-每个天体有一个 `theme`（`data/bodies.js` 末尾的 `THEMES` 表），用于**轨道线、标签、
-信息栏标题**，以及以后的公转轨迹。只给直觉上有明确颜色的天体单独指定（地球亮绿、
-火星亮红、土星土黄、天王星浅蓝、木卫一硫磺黄……），其余一律 `THEME_DEFAULT` 中性灰。
-这**不是**天体的真实外观色（那是贴图的事），而是识别用的标识色，所以远处的光点
-仍然用贴近真实外观的颜色，不跟主题色走。
-
-标签的主题色写成 CSS 变量 `--tc` 而不是直接 `color`，这样 `.hovered` / `.selected`
-还能正常覆盖。
-
-## 坐标系
-
-J2000 黄道系，**+Z 指黄北**，黄道面即 `z = 0`（自由模式的"基本平面"）。
-`G` 在 关 / 方格 / 极坐标 之间切换，默认关闭。格距固定 **1 AU**（±50 AU，
-每 10 AU 一根主线），沿两条坐标轴的**四个半轴**都标 AU 刻度，两个方向都用无符号读数
-（刻度只作距离参照）。读数先按屏幕格距在 1/5/10 AU 之间抽稀，
-再按相邻标签的屏幕间距二次抽稀（透视会把远处的刻度全挤到一起），四个半轴各自独立抽稀。
-
-行星根数取 Standish 近似表；卫星根数写在母天体的**赤道系**里（由 IAU 极点 RA/Dec 构造），
-月球除外（它相对黄道面倾斜 5.145°）。卫星的历元相位 M0 多为估计值。
-
-## 两个"看着像 bug，其实是几何问题"的坑
-
-记在这里，因为都不是靠调参能解决的：
-
-**轨道线必须穿过天体。** 轨道线是 512 段折线内接在椭圆上，弦的矢高约 `1.88e-5·a`——
-地球是 2,800 km（小于地球半径，看不出来），海王星就是 84,700 km，足足 3.4 个海王星半径，
-肉眼可见地擦肩而过。加密段数解决不了（谷神星要 3800 段、天涯海角要 10 万段）。
-解法是 `sampleOrbit()` 把**采样相位对齐到天体当前位置**，并以天体为几何原点：
-第 0 个顶点精确落在天体上，误差从该点起二次增长，等到看得见时早就出画面了。
-顺带也消除了 float32 在 4.5e6 场景单位处那 ~450 km 的偏移。
-⚠️ 天体运动起来之后，需要在位置更新后调 `OrbitLine.rebuild(timeDays)`，否则锚点会漂。
-
-**超长线段会被光栅化吃掉。** 黄道面网格最初每条线是横跨 100 格的单条线段，
-在掠射视角下从相机跟前一直伸到几十 AU 外，深度跨好几个数量级——结果近处整片不画，
-只在地平线附近剩一条带（关掉深度测试也一样，所以不是遮挡）。
-`grid.js` 的 `pushLine()` 把每条线按格细分，每段深度范围都很小，问题消失。
-对数深度缓冲的深度插值同样只在短图元上才准，所以这个细分是必需的。
-
-## 纹理
-
-`solar_textures/` 里有真实贴图的天体（日、水、金、地、月、火、木、土+环、天、海）
-在 `data/bodies.js` 的 `tex:` 字段里声明，其余天体继续用 `render/textures.js` 的程序化表面。
-三点值得一提：
-
-- **显存**：素材多为 8192×4096，解码后每张约 134 MB，十几张就上 GB。
-  所以 `render/assets.js` 在解码阶段就降采样到 `TEXTURE_MAX_WIDTH`（默认 2048，约 11 MB/张）。
-  显存充裕想更清晰，把这个常量调到 4096 或 8192，然后重跑 `npm run textures`
-  （构建期的派生图宽度就是跟着它走的，只改常量不重跑等于白改）。
-- **地球夜面**：three 内置的 `emissiveMap` 是无条件叠加的（白天也会亮），
-  所以在 `bodyView.js` 里打了一小段 shader 补丁，按太阳方向与法线的夹角做遮罩，只在晨昏线之外发光。
-- **土星环**：`8k_saturn_ring_alpha.png` 是 8192×500 的径向条带。
-  内外缘半径是解出它的 alpha 剖面标定的——卡西尼缝落在条带 x≈0.70 处，
-  对应真实的 119,875 km，由此反推条带两端 = 62,829 / 144,251 km。
-
-## 下一步的接入点
-
-- **真实时间流逝**：`SolarSystem.timeDays` 已经是完整的时间轴，`update()` 就是按它重算所有位置。
-  在主循环 `frame()` 里推进 `system.timeDays` 并调 `system.update()` 就能公转起来；
-  自转用 `def.rotHours`（负值表示逆行）绕天体自身 +Z 轴转即可——
-  `bodyView` 的球体几何已经把极轴扳到 +Z，且朝向已按 IAU 极点烘好。
-- 尚未实现：日食/星环投影、大气散射、彗星、小行星带群体、时间控制 UI。
+Eclipse and ring shadows, atmospheric scattering, comets, and a time control in the interface.

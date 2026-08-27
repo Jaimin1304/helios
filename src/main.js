@@ -23,16 +23,16 @@ import { attachInput } from './control/input.js';
 import { Hud } from './ui/hud.js';
 import { applyStaticStrings, T } from './i18n.js';
 
-applyStaticStrings(); // 先按浏览器语言把静态文案落位，再建 HUD
+applyStaticStrings(); // place the static copy for the browser language before building the HUD
 
 const canvas = document.getElementById('view');
 const hud = new Hud();
 
-// ───────────────────────────── 渲染器 ─────────────────────────────
+// ───────────────────────────── Renderer ─────────────────────────────
 const renderer = new WebGLRenderer({
   canvas,
   antialias: true,
-  logarithmicDepthBuffer: true, // 真实比例下唯一能用的深度方案
+  logarithmicDepthBuffer: true, // the only workable depth scheme at true scale
   powerPreference: 'high-performance',
 });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -42,21 +42,21 @@ renderer.toneMappingExposure = 1;
 
 const scene = new Scene();
 const camera = new PerspectiveCamera(FOV, window.innerWidth / window.innerHeight, 1e-4, FAR_UNITS);
-camera.up.set(0, 0, 1); // 黄道北极朝上
+camera.up.set(0, 0, 1); // ecliptic north is up
 scene.add(camera);
 
 const sky = createSky(scene);
 
-// 太阳：decay=2 的点光源，物理平方反比。
-// 强度定标成"1 AU 处、反照率 1 的表面正对光时出射亮度 = 1"。
+// The Sun is a decay=2 point light, so falloff is physically inverse-square. Intensity is
+// scaled so that a unit-albedo surface facing the light at 1 AU has an outgoing radiance of 1.
 const sunLight = new PointLight(new Color('#fff6ec'), Math.PI * AU_UNITS * AU_UNITS, 0, 2);
 scene.add(sunLight);
 const ambient = new AmbientLight(0xffffff, AMBIENT);
 scene.add(ambient);
 
-// ───────────────────────────── 场景内容 ─────────────────────────────
+// ───────────────────────────── Scene contents ─────────────────────────────
 const system = new SolarSystem();
-system.setDate(new Date()); // 时间轴暂时冻结在打开页面的时刻
+system.setDate(new Date()); // the clock starts at the moment the page opens
 
 /** @type {Map<string, BodyView>} */
 const views = new Map();
@@ -70,10 +70,10 @@ let belts = null;
 let lagrange = null;
 
 let selected = null;
-let orbitOpacity = 1; // 0 = 关闭轨道线
-let timeIndex = TIME_SCALE_DEFAULT_INDEX; // T 键在 TIME_SCALES 里循环
+let orbitOpacity = 1; // 0 turns orbit lines off
+let timeIndex = TIME_SCALE_DEFAULT_INDEX; // T cycles through TIME_SCALES
 
-// ───────────────────────────── 每帧用的临时量 ─────────────────────────────
+// ───────────────────────── Per-frame scratch values ─────────────────────────
 const camPosKm = new Vector3();
 const relKm = new Vector3();
 const relUnits = new Vector3();
@@ -82,13 +82,13 @@ const rightV = new Vector3();
 const upV = new Vector3();
 const sunViewPos = new Vector3();
 const sunRel = new Vector3();
-/** 需要每帧知道太阳观察空间坐标的视图（地球夜面灯光） */
+/** Views that need the Sun's view-space position each frame (Earth's night-side lights) */
 const sunAwareViews = [];
 
 let viewW = window.innerWidth;
 let viewH = window.innerHeight;
 let focalPx = 1;
-let logExposure = null; // null = 尚未初始化，首帧直接取目标值而不是从 1 慢慢爬
+let logExposure = null; // null means uninitialised: the first frame takes the target directly
 let lastNear = -1;
 
 function updateViewport() {
@@ -101,14 +101,14 @@ function updateViewport() {
 }
 window.addEventListener('resize', updateViewport);
 
-// ───────────────────────────── 拾取 ─────────────────────────────
-/** 屏幕拾取：先比圆面命中（取最近的），没有再比标签热区（取离光标最近的） */
+// ───────────────────────────── Picking ─────────────────────────────
+/** Screen picking: try disc hits first, taking the nearest, then label hot zones */
 function pick(clientX, clientY) {
   const rect = canvas.getBoundingClientRect();
   const px = clientX - rect.left;
   const py = clientY - rect.top;
 
-  // 三级优先：① 圆面命中（取离相机最近的）② 标签文字块 ③ 光点热区
+  // Three tiers: a disc hit (nearest to the camera wins), then the label text box, then the dot
   let best = null;
   let bestScore = Infinity;
   for (const b of system.bodies) {
@@ -131,7 +131,7 @@ function pick(clientX, clientY) {
   return best;
 }
 
-/** 把黄道系坐标（km，日心）投到屏幕像素，供坐标系刻度定位 */
+/** Project heliocentric ecliptic km to screen pixels, used to place the grid ticks */
 const projTmp = new Vector3();
 function projectEcliptic(x, y, z) {
   projTmp.set(x, y, z).sub(camPosKm);
@@ -157,7 +157,7 @@ function focusBody(body) {
   rig.flyTo(body);
 }
 
-// ───────────────────────────── 主循环 ─────────────────────────────
+// ───────────────────────────── Main loop ─────────────────────────────
 let lastT = performance.now();
 let hudTimer = 0;
 
@@ -165,7 +165,8 @@ function frame(now) {
   const dt = Math.min(0.1, (now - lastT) / 1000);
   lastT = now;
 
-  // 时间流逝：真实秒 × 当前倍率 → 仿真天，所有天体按开普勒根数重新定位并自转
+  // Time flow: real seconds times the current rate gives simulated days, after which every
+  // body is repositioned and re-oriented from its Kepler elements
   system.advance((dt * TIME_SCALES[timeIndex]) / 86400);
   rig.update(dt);
   rig.position(camPosKm);
@@ -173,7 +174,8 @@ function frame(now) {
   rig.right(rightV);
   rig.upVector(upV);
 
-  // 相机永远在场景原点，世界围着它平移（浮动原点），float32 才够用
+  // The camera stays at the scene origin and the world translates around it. This floating
+  // origin is what keeps float32 sufficient for rendering.
   camera.position.set(0, 0, 0);
   camera.lookAt(fwd.x, fwd.y, fwd.z);
   camera.updateMatrixWorld();
@@ -184,7 +186,7 @@ function frame(now) {
     relKm.subVectors(body.position, camPosKm);
     const dist = relKm.length();
 
-    // 相机坐标系（右/上/前），全程双精度
+    // Camera basis (right/up/forward), kept in double precision throughout
     const zc = relKm.dot(fwd);
     const s = body.screen;
     s.dist = dist;
@@ -201,7 +203,8 @@ function frame(now) {
       s.y = -1e4;
     }
 
-    // 有环的天体按环外缘算"体积"，免得贴着环飞时被近裁面切掉
+    // Ringed bodies use the outer ring edge as their extent, so flying close to the rings
+    // does not let the near plane clip them
     const eff = body.def.rings ? body.def.rings.outerKm : body.radius;
     nearestSurface = Math.min(nearestSurface, dist - eff);
 
@@ -219,8 +222,8 @@ function frame(now) {
   }
   for (const v of sunAwareViews) v.setSunViewPos(sunViewPos);
 
-  // 遮挡：被行星挡住的天体不该还飘着标签、也不该被点中。
-  // 屏幕空间判据即可——遮挡者更近，且目标落在它的圆面里。
+  // Occlusion: a body hidden behind a planet should neither carry a label nor be clickable.
+  // A screen-space test suffices, since the occluder is nearer and the target falls inside its disc.
   const occluders = [];
   for (const b of system.bodies) {
     if (b.screen.visible && b.screen.px > 3) occluders.push(b);
@@ -239,8 +242,8 @@ function frame(now) {
     }
   }
 
-  // 轨道线：几何体锚定在天体上，所以整条线平移到**天体**位置；
-  // 但视在大小仍由到轨道中心（母天体）的距离决定。
+  // Orbit lines: the geometry is anchored to the body, so the whole line translates to the
+  // BODY's position, while its apparent size still follows the distance to the primary.
   for (const ol of orbitLines) {
     relUnits.subVectors(ol.body.position, camPosKm).multiplyScalar(KM_TO_UNITS);
     const parentDistUnits = Math.max(ol.body.parent.position.distanceTo(camPosKm) * KM_TO_UNITS, 1e-9);
@@ -252,7 +255,7 @@ function frame(now) {
   lagrange.update(camPosKm, projectEcliptic, focalPx, viewW, viewH);
   belts.update(sunRel, rig.dist, camPosKm.length(), focalPx, system.timeDays);
 
-  // 近裁面跟着最近的物体走，远裁面固定覆盖整个已知太阳系
+  // The near plane tracks the closest object; the far plane is fixed and covers the whole system
   const nearKm = Number.isFinite(nearestSurface) && nearestSurface > 0
     ? nearestSurface * 0.3
     : 1;
@@ -263,11 +266,12 @@ function frame(now) {
     camera.updateProjectionMatrix();
     lastNear = near;
   }
-  // 天球必须稳稳落在近/远裁面之间，两头都留足余量
+  // The sky shell has to sit well inside the near and far planes with margin at both ends
   sky.scale.setScalar(Math.min(camera.near * 100, FAR_UNITS * 0.2));
 
-  // 自动曝光：外太阳系光照弱 6 个数量级，靠相机"感光度"补偿一部分。
-  // 自由模式下的基准下限取 1 AU（中性曝光），聚焦时才允许压到 0.3 AU。
+  // Auto-exposure. The outer system receives six orders of magnitude less light, and camera
+  // sensitivity makes up part of that. In free mode the reference floor is 1 AU, which is
+  // neutral exposure; focus mode may go down to 0.3 AU.
   const refKm = rig.focus ? rig.focus.sunDistance : rig.pivot.length();
   const refFloor = rig.focus ? EXPOSURE_REF_MIN_AU : 1;
   const refAU = Math.min(EXPOSURE_REF_MAX_AU, Math.max(refFloor, refKm / AU_KM));
@@ -278,7 +282,7 @@ function frame(now) {
     : logExposure + (targetLog - logExposure) * (1 - Math.exp(-dt * 2.5));
   const exposure = Math.exp(logExposure);
   renderer.toneMappingExposure = exposure;
-  ambient.intensity = AMBIENT / exposure; // 环境光保持视觉恒定
+  ambient.intensity = AMBIENT / exposure; // hold ambient visually constant
 
   labels.update(viewW, viewH);
 
@@ -296,18 +300,18 @@ function frame(now) {
   requestAnimationFrame(frame);
 }
 
-// ───────────────────────────── 启动 ─────────────────────────────
+// ───────────────────────────── Startup ─────────────────────────────
 const yieldToBrowser = () => new Promise((r) => setTimeout(r, 0));
 
 async function boot() {
   updateViewport();
 
-  // 1) 先把真实纹理拉下来（占进度条前 55%）
+  // 1) Pull the real textures first; this is the leading 55% of the progress bar
   const assets = await preloadBodyTextures(BODIES, (done, all, url) => {
     hud.progress(0.55 * (done / all), T.loadTextures(url.split('/').pop()));
   });
 
-  // 2) 再建天体视图；没有真实纹理的天体在这一步现场生成程序化表面
+  // 2) Build the body views. Anything without a real texture gets a procedural surface here.
   const total = system.bodies.length;
   for (let i = 0; i < total; i++) {
     const body = system.bodies[i];
@@ -362,7 +366,7 @@ async function boot() {
   hud.finishLoading();
   selectBody(system.byId.get('earth'));
 
-  // 直达视角：?focus=saturn 直接聚焦，?dist=45 设定初始距离(AU)
+  // Deep links: ?focus=saturn focuses a body, ?dist=45 sets the initial distance in AU
   const q = new URLSearchParams(location.search);
   const target = q.get('focus') && system.byId.get(q.get('focus'));
   if (target) {
@@ -373,12 +377,12 @@ async function boot() {
 
   lastT = performance.now();
   requestAnimationFrame(frame);
-  window.__ready = true; // 供自动化截图判断"已就绪"
+  window.__ready = true; // lets automated screenshots know the scene is ready
 }
 
 boot();
 
-// 调参用
+// Exposed for tuning and debugging
 window.HELIOS = {
   system, rig, views, orbitLines, grid,
   get belts() { return belts; }, get lagrange() { return lagrange; }, renderer, scene, camera, focusBody,

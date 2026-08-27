@@ -1,20 +1,20 @@
-# 推到 main 就自动构建并发布到 GitHub Pages。
+# Every push to main builds the site and publishes it to GitHub Pages.
 #
-# 前置：仓库 Settings → Pages → Build and deployment → Source 选 "GitHub Actions"
-# （只需设置一次；不需要 gh-pages 分支，也不需要任何 token）。
+# One-time setup: repository Settings -> Pages -> Build and deployment -> Source -> GitHub Actions.
+# No gh-pages branch and no tokens are involved.
 name: Deploy to GitHub Pages
 
 on:
   push:
     branches: [main]
-  workflow_dispatch: # 允许在 Actions 页面手动触发
+  workflow_dispatch: # allows a manual run from the Actions tab
 
 permissions:
   contents: read
   pages: write
   id-token: write
 
-# 同一时间只跑一个部署；新的推送取消排队中的旧任务
+# Only one deployment runs at a time; a newer push cancels a queued one
 concurrency:
   group: pages
   cancel-in-progress: true
@@ -32,8 +32,8 @@ jobs:
 
       - run: npm ci
 
-      # vite build 会先调 scripts/build-textures.mjs：
-      # 8K 原图 → 2048px webp，66 MB → 2.5 MB，约 5 秒
+      # vite build runs scripts/build-textures.mjs first, turning the 8K originals into
+      # 2048px webp and taking 66 MB down to 2.5 MB in about five seconds
       - run: npm run build
 
       - uses: actions/upload-pages-artifact@v3

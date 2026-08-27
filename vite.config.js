@@ -6,15 +6,14 @@ import { buildTextures } from './scripts/build-textures.mjs';
 const root = import.meta.dirname;
 
 /**
- * 纹理有两套：
- *   开发时  → 直接用 solar_textures/ 里的 8K 原图（本地读盘，无所谓大小，
- *             而且改素材立刻生效）；
- *   构建时  → scripts/build-textures.mjs 生成 .textures/ 里的 2K webp
- *             （66 MB → 2.2 MB），拷进 dist/solar_textures/。
+ * Textures come in two forms. Development serves the 8K originals straight out of
+ * solar_textures/, where size is irrelevant because they are read from local disk and edits
+ * take effect immediately. A build runs scripts/build-textures.mjs to produce 2K webp
+ * derivatives in .textures/ (66 MB down to 2.5 MB) and copies them into dist/solar_textures/.
  *
- * 文件名会从 xxx.jpg 变成 xxx.webp，所以把「原名 → 新名」的映射通过 define
- * 注入前端，由 assets.js 的 resolveTextureUrl() 在 fetch 前换掉。
- * 开发时注入空表，一切原样通过。
+ * Names change from xxx.jpg to xxx.webp along the way, so the old-to-new map is injected into
+ * the front end through define and applied by resolveTextureUrl() in assets.js just before the
+ * fetch. Development injects an empty map and everything passes through untouched.
  */
 export default defineConfig(async ({ command }) => {
   const tex = command === 'build'
@@ -31,7 +30,7 @@ export default defineConfig(async ({ command }) => {
         closeBundle() {
           const dest = resolve(root, 'dist/solar_textures');
           rmSync(dest, { recursive: true, force: true });
-          // 只拷派生图；没被引用到的素材（如 8k_venus_surface.jpg）根本不进 dist
+          // Only derivatives are copied, so unreferenced source art never reaches dist
           cpSync(tex.outDir, dest, {
             recursive: true,
             filter: (src) => !src.endsWith('manifest.json'),

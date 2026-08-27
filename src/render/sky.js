@@ -6,12 +6,13 @@ import { OBLIQUITY, SKYBOX_TEXTURE, SKY_BRIGHTNESS } from '../config.js';
 import { resolveTextureUrl } from './assets.js';
 
 /**
- * 星空天球。做成一个跟随相机的反面球而不是 scene.background，是为了
- *   1) 能自由摆正朝向（贴图是赤道系，场景是黄道系）；
- *   2) toneMapped=false，不受自动曝光影响（曝光会在 0.15~60 之间大幅变化）。
- * 关掉深度测试并最先绘制，所以看不见深度冲突；但顶点仍会被近/远裁面裁掉，
- * 而近裁面在本工程里会随镜头在 1e-7 ~ 1e5 单位之间大幅漂移，
- * 所以几何体半径取 1，由主循环每帧按 camera.near 缩放。
+ * Starfield celestial sphere, drawn as a camera-following back-face sphere rather than a
+ * scene.background for two reasons. The orientation has to be adjustable, since the texture
+ * is in equatorial coordinates while the scene is ecliptic, and toneMapped=false keeps it
+ * clear of the auto-exposure range, which swings between 0.15 and 60.
+ * Depth testing is off and it draws first, so z-fighting never appears. Vertices are still
+ * clipped by the near and far planes, and the near plane here drifts between 1e-7 and 1e5
+ * units, so the geometry has radius 1 and the main loop rescales it by camera.near.
  */
 export function createSky(scene, onLoad) {
   const geo = new SphereGeometry(1, 64, 32);
@@ -27,16 +28,17 @@ export function createSky(scene, onLoad) {
   const mesh = new Mesh(geo, mat);
   mesh.frustumCulled = false;
   mesh.renderOrder = -1000;
-  // 球体贴图极点在 +Y，把它转到天球北极方向（黄道系里 = (0, sinε, cosε)）
+  // The sphere texture's pole sits at +Y; rotate it to the celestial north pole,
+  // which in ecliptic coordinates is (0, sin e, cos e).
   mesh.rotation.x = Math.PI / 2 - OBLIQUITY;
   scene.add(mesh);
 
-  // 天球不走 assets.js 的降采样，但同样要吃构建期的派生图映射
+  // The sky bypasses the downsampling in assets.js but still needs the build-time texture map
   new TextureLoader().load(
     resolveTextureUrl(SKYBOX_TEXTURE),
     (tex) => {
       tex.colorSpace = SRGBColorSpace;
-      // 从球内侧看会左右镜像，翻回来让星图方位正确
+      // Seen from inside the sphere the map is mirrored; flip it back so the sky reads correctly
       tex.wrapS = RepeatWrapping;
       tex.repeat.x = -1;
       tex.offset.x = 1;
@@ -47,7 +49,7 @@ export function createSky(scene, onLoad) {
     },
     undefined,
     (err) => {
-      console.warn('[helios] 星空贴图加载失败，退回纯黑背景', err);
+      console.warn('[helios] failed to load the sky texture, falling back to plain black', err);
       mat.color.setScalar(0);
       onLoad?.();
     },
