@@ -173,7 +173,7 @@ html, body {
   margin-bottom: 9px;
 }
 
-#info { top: 16px; right: 18px; min-width: 244px; }
+#info { top: 16px; right: 18px; width: 300px; min-width: 244px; }
 .info-title {
   display: flex;
   align-items: baseline;
@@ -194,6 +194,24 @@ html, body {
   font-size: 12px;
   color: var(--dim);
 }
+.info-texture-note {
+  margin-top: 10px;
+  padding: 8px 9px;
+  border-left: 2px solid #d6a54a;
+  background: rgba(214, 165, 74, 0.07);
+  color: #c8c0ae;
+  font-size: 10px;
+  line-height: 1.55;
+}
+.info-texture-note strong {
+  display: block;
+  margin-bottom: 3px;
+  color: #e1ba70;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+}
+.info-texture-note span { display: block; }
 
 #help { bottom: 16px; left: 18px; max-width: 440px; }
 
@@ -291,6 +309,7 @@ button:focus-visible {
     right: max(8px, env(safe-area-inset-right));
     bottom: calc(60px + max(8px, env(safe-area-inset-bottom)));
     left: max(8px, env(safe-area-inset-left));
+    width: auto;
     min-width: 0;
     max-height: 52dvh;
     padding: 5px 9px;
@@ -309,6 +328,7 @@ button:focus-visible {
     border-bottom: 0;
   }
   #info:not(.expanded) #info-rows,
+  #info:not(.expanded) .info-texture-note,
   #info:not(.expanded) .info-hint { display: none; }
   #info-name { font-size: 14px; }
   #info-toggle {
@@ -329,6 +349,8 @@ button:focus-visible {
   #info dt,
   #info dd,
   .info-hint { font-size: 11px; }
+  .info-texture-note,
+  .info-texture-note strong { font-size: 10px; }
 
   #mobile-controls {
     position: absolute;

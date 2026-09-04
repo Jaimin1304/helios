@@ -52,6 +52,10 @@ test('AI-assisted texture sources are explicitly labelled', () => {
   const generated = BODIES.filter(({ tex }) => tex.map.includes('_generated.'));
   assert.equal(generated.length, 26);
   assert.ok(generated.every(({ tex }) => tex.map.startsWith('./solar_textures/2k_')));
+  assert.ok(generated.every(({ tex }) => tex.scientificReconstruction === true));
+
+  const observed = BODIES.filter(({ tex }) => !tex.map.includes('_generated.'));
+  assert.ok(observed.every(({ tex }) => tex.scientificReconstruction !== true));
 });
 
 test('body definitions contain no legacy procedural-surface parameters', () => {

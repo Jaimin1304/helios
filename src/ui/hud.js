@@ -63,6 +63,9 @@ export class Hud {
     this.infoEn = document.getElementById('info-en');
     this.infoToggle = document.getElementById('info-toggle');
     this.rows = document.getElementById('info-rows');
+    this.textureNote = document.getElementById('info-texture-note');
+    this.textureNoteTitle = document.getElementById('info-texture-note-title');
+    this.textureNoteBody = document.getElementById('info-texture-note-body');
     this.mobileControls = document.getElementById('mobile-controls');
     this.loading = document.getElementById('loading');
     this.loaderFill = document.getElementById('loader-fill');
@@ -186,6 +189,12 @@ export class Hud {
       // In Chinese the subtitle carries the English name. In English the title already is
       // the English name, so the subtitle stays empty.
       this.infoEn.textContent = LANG === 'zh' ? body.def.en : '';
+      const isReconstruction = body.def.tex?.scientificReconstruction === true;
+      this.textureNote.classList.toggle('hidden', !isReconstruction);
+      if (isReconstruction) {
+        this.textureNoteTitle.textContent = T.textureReconstructionTitle;
+        this.textureNoteBody.textContent = T.textureReconstructionBody;
+      }
     }
     const rows = [
       [T.rowType, T.kind[body.kind] ?? body.kind],

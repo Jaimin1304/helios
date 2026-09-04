@@ -87,6 +87,8 @@ export async function preloadBodyTextures(bodies, onProgress) {
   for (const def of bodies) {
     if (!def.tex) continue;
     for (const [slot, url] of Object.entries(def.tex)) {
+      // Texture objects may also carry provenance metadata for the UI.
+      if (typeof url !== 'string') continue;
       const colorSpace = slot === 'clouds' ? 'linear' : 'srgb';
       const key = `${url}|${colorSpace}`;
       if (seen.has(key)) continue;

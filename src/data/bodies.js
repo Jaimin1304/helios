@@ -28,7 +28,10 @@ function km(a, e, i, node, peri, M0, period) {
 }
 
 /** AI-assisted maps live beside observed maps but remain unmistakable in code and on disk. */
-const generatedTexture = (id) => ({ map: `./solar_textures/2k_${id}_generated.jpg` });
+const generatedTexture = (id) => ({
+  map: `./solar_textures/2k_${id}_generated.jpg`,
+  scientificReconstruction: true,
+});
 
 export const BODIES = [
   // ────────────────────────────── Star ──────────────────────────────
