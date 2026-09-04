@@ -14,7 +14,7 @@ import { resolveTextureUrl } from './assets.js';
  * clipped by the near and far planes, and the near plane here drifts between 1e-7 and 1e5
  * units, so the geometry has radius 1 and the main loop rescales it by camera.near.
  */
-export function createSky(scene, onLoad) {
+export function createSky(scene) {
   const geo = new SphereGeometry(1, 64, 32);
   const mat = new MeshBasicMaterial({
     side: BackSide,
@@ -45,13 +45,11 @@ export function createSky(scene, onLoad) {
       tex.anisotropy = 8;
       mat.map = tex;
       mat.needsUpdate = true;
-      onLoad?.();
     },
     undefined,
     (err) => {
       console.warn('[helios] failed to load the sky texture, falling back to plain black', err);
       mat.color.setScalar(0);
-      onLoad?.();
     },
   );
 

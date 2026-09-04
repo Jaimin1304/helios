@@ -25,6 +25,7 @@ export const LANG = detect();
 const ZH = {
   docTitle: 'Helios · 真实比例太阳系',
   brandSub: '真实比例太阳系',
+  canvasLabel: '可交互的真实比例太阳系',
 
   modeFree: '自由模式',
   modeFlying: '飞行中…',
@@ -63,9 +64,19 @@ const ZH = {
   gridChip: (mode, unit) => `黄道面 ${mode} · 格距 ${unit}`,
   lagrangeChip: (n) => `拉格朗日点 · ${n} 组`,
 
+  infoExpand: '展开天体信息',
+  infoCollapse: '收起天体信息',
   infoHint: '单击 = 选中 · 双击天体或标签 = 飞抵并聚焦',
+  mobileControls: '场景控制',
+  mobileOrbits: '轨道',
+  mobileLabels: '标签',
+  mobileGrid: '网格',
+  mobileLagrange: 'L 点',
+  mobileTime: '时间',
+  mobileUi: '界面',
   helpTitle: '操作',
   helpRows: [
+    ['触控', '单指旋转 · 双指平移及缩放'],
     ['中键拖拽', '平移视角（自由模式）'],
     ['右键拖拽', '绕视口中心与黄道面的交点旋转'],
     ['滚轮', '缩放（指数级，跨 10 个数量级）'],
@@ -76,7 +87,7 @@ const ZH = {
     ['<kbd>G</kbd>', '黄道面坐标系：关 → 方格 → 极坐标'],
     ['<kbd>L</kbd>', '拉格朗日点（母天体–子天体 L1~L5）'],
     ['<kbd>T</kbd>', '时间流逝：1× → 1440× → 43200× → 525600×'],
-    ['<kbd>O</kbd> <kbd>N</kbd> <kbd>Esc</kbd>', '轨道线 · 天体标签 · 退出聚焦'],
+    ['<kbd>O</kbd> <kbd>N</kbd> <kbd>F</kbd> <kbd>Esc</kbd>', '轨道线 · 天体标签 · 聚焦选中项 · 退出聚焦'],
     ['<kbd>H</kbd>', '隐藏 / 显示全部界面'],
   ],
 
@@ -84,11 +95,13 @@ const ZH = {
   loadSurface: (name) => `正在生成 ${name} 的表面…`,
   loadBelts: '正在播撒小行星带与柯伊伯带…',
   loadReady: '就绪',
+  loadFailed: '初始化失败；请查看浏览器控制台。',
 };
 
 const EN = {
   docTitle: 'Helios · The Solar System at True Scale',
   brandSub: 'THE SOLAR SYSTEM AT TRUE SCALE',
+  canvasLabel: 'Interactive true-scale solar system',
 
   modeFree: 'FREE',
   modeFlying: 'FLYING…',
@@ -127,9 +140,19 @@ const EN = {
   gridChip: (mode, unit) => `ECLIPTIC ${mode} · CELL ${unit}`,
   lagrangeChip: (n) => `LAGRANGE · ${n} SYSTEMS`,
 
+  infoExpand: 'Expand body information',
+  infoCollapse: 'Collapse body information',
   infoHint: 'Click = select · double-click a body or label = fly to and focus',
+  mobileControls: 'Scene controls',
+  mobileOrbits: 'Orbits',
+  mobileLabels: 'Labels',
+  mobileGrid: 'Grid',
+  mobileLagrange: 'L points',
+  mobileTime: 'Time',
+  mobileUi: 'UI',
   helpTitle: 'CONTROLS',
   helpRows: [
+    ['Touch', 'One finger orbits · two fingers pan and zoom'],
     ['Middle drag', 'Pan the view (free mode)'],
     ['Right drag', 'Orbit the view-centre ∩ ecliptic point'],
     ['Wheel', 'Zoom (exponential, 10 orders of magnitude)'],
@@ -140,7 +163,7 @@ const EN = {
     ['<kbd>G</kbd>', 'Ecliptic frame: off → grid → polar'],
     ['<kbd>L</kbd>', 'Lagrange points (primary–secondary L1–L5)'],
     ['<kbd>T</kbd>', 'Time rate: 1× → 1440× → 43200× → 525600×'],
-    ['<kbd>O</kbd> <kbd>N</kbd> <kbd>Esc</kbd>', 'Orbits · labels · exit focus'],
+    ['<kbd>O</kbd> <kbd>N</kbd> <kbd>F</kbd> <kbd>Esc</kbd>', 'Orbits · labels · focus selection · exit focus'],
     ['<kbd>H</kbd>', 'Hide / show all UI'],
   ],
 
@@ -148,6 +171,7 @@ const EN = {
   loadSurface: (name) => `Generating the surface of ${name}…`,
   loadBelts: 'Seeding the asteroid and Kuiper belts…',
   loadReady: 'Ready',
+  loadFailed: 'Startup failed; see the browser console.',
 };
 
 /** String table for the active language. Parameterised entries are functions. */
@@ -164,6 +188,9 @@ export function applyStaticStrings() {
   document.title = T.docTitle;
   for (const el of document.querySelectorAll('[data-i18n]')) {
     el.textContent = T[el.dataset.i18n];
+  }
+  for (const el of document.querySelectorAll('[data-i18n-aria]')) {
+    el.setAttribute('aria-label', T[el.dataset.i18nAria]);
   }
   const help = document.getElementById('help-rows');
   if (help) {

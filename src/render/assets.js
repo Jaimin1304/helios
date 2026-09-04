@@ -50,8 +50,8 @@ async function decodeScaled(url, maxWidth) {
   return bmp;
 }
 
-/** @param {'srgb'|'linear'} colorSpace srgb for colour maps, linear for data such as cloud alpha */
-export async function loadTexture(url, colorSpace = 'srgb', maxWidth = TEXTURE_MAX_WIDTH) {
+/** @param {'srgb'|'linear'} colorSpace sRGB for colour maps, linear for data textures. */
+async function loadTexture(url, colorSpace = 'srgb', maxWidth = TEXTURE_MAX_WIDTH) {
   const key = `${url}|${colorSpace}|${maxWidth}`;
   if (cache.has(key)) return cache.get(key);
 
@@ -77,11 +77,11 @@ export async function loadTexture(url, colorSpace = 'srgb', maxWidth = TEXTURE_M
 }
 
 /**
- * Preload every real texture declared in the body table.
+ * Preload every observed or generated texture declared in the body table.
  * @returns {Promise<Map<string, Texture>>} keyed by `url|colorSpace`
  */
 export async function preloadBodyTextures(bodies, onProgress) {
-  /** @type {{url:string, colorSpace:string}[]} */
+  /** @type {{url:string, colorSpace:'srgb'|'linear', key:string}[]} */
   const jobs = [];
   const seen = new Set();
   for (const def of bodies) {
@@ -96,6 +96,7 @@ export async function preloadBodyTextures(bodies, onProgress) {
   }
 
   const out = new Map();
+  const total = jobs.length;
   let done = 0;
   // Concurrent but throttled, so a dozen 8K decodes cannot blow out memory at once
   const LANES = 3;
@@ -108,14 +109,14 @@ export async function preloadBodyTextures(bodies, onProgress) {
         } catch (err) {
           console.warn(`[helios] failed to load texture: ${job.url}`, err);
         }
-        onProgress?.(++done, done + jobs.length, job.url);
+        onProgress?.(++done, total, job.url);
       }
     }),
   );
   return out;
 }
 
-/** Fetch a preloaded texture; null means the caller should fall back to a procedural material */
+/** Fetch a preloaded texture; null means the caller uses its solid-colour failure state. */
 export function pickTexture(assets, url, colorSpace = 'srgb') {
   if (!url) return null;
   return assets.get(`${url}|${colorSpace}`) ?? null;

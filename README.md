@@ -14,6 +14,9 @@ npm run build    # writes dist/, textures included
 
 | Input | Free mode | Focus mode |
 | --- | --- | --- |
+| Tap / double-tap | Select / fly to and focus | Same |
+| One-finger drag | Orbit | Orbit the body |
+| Two-finger touch | Pan and pinch-zoom | Pinch-zoom |
 | Middle drag | Pan | Releases focus immediately, then pans |
 | Middle click | — | Release focus |
 | Right drag | Orbit the point where the view-centre ray meets the ecliptic | Orbit the body |
@@ -23,7 +26,7 @@ npm run build    # writes dist/, textures included
 | `G` | Ecliptic frame: off, grid, polar | Same |
 | `L` | Lagrange points, L1 to L5 for every body and its primary | Same |
 | `T` | Time rate: 1x, 1440x, 43200x, 525600x | Same |
-| `H` | Hide or show the whole interface, leaving the HELIOS mark | Same |
+| `H` | Hide or show the interface; phones keep one restore control | Same |
 | `O` `N` `F` `Esc` | Orbit lines, labels, focus the selection, exit focus | |
 
 Labels are `pointer-events: none`, so every mouse gesture reaches the canvas and hovering a
@@ -31,16 +34,24 @@ label never blocks panning, orbiting or zooming. Clicking one still works, becau
 in screen space on the canvas side and tries the body's disc, then the label's text box, then
 the dot's hot zone.
 
-Deep links for debugging: `?focus=saturn`, `?dist=45` (AU), `?lang=en` or `?lang=zh`.
+Phones get the same scene controls without requiring a keyboard: a 44 px touch-target toolbar
+toggles orbits, labels, the coordinate grid, Lagrange points, time rate and the HUD. It sits at
+the bottom in portrait and on the right in landscape. The selected-body card is collapsed to
+its title by default and expands on demand, preserving most of the viewport for the scene.
+
+Deep links for debugging: `?focus=saturn`, `?dist=45` (AU), `?date=2027-01-22T07:00:00Z`,
+`?lang=en` or `?lang=zh`. Invalid distances and dates are ignored rather than poisoning camera
+or simulation state.
 
 ## What true scale costs
 
 Three problems fall out of refusing to fudge the scale, and most of the interesting code exists
 to deal with them.
 
-**Precision.** The scene spans about eleven orders of magnitude, from Neptune's orbit at
-4.5e9 km down to a 6 km moon, which float32 cannot represent. Every orbit and every piece of
-camera state is therefore computed in double precision with km as the unit (`src/sim`,
+**Precision.** Body geometry spans nearly eight orders of magnitude, from outer dwarf-planet
+orbits around 1.5e10 km down to Mimas at roughly 200 km radius, which float32 cannot represent
+at once with useful local precision. Every orbit and every piece of camera state is therefore
+computed in double precision with km as the unit (`src/sim`,
 `src/control/cameraRig.js`). Rendering uses a floating origin: the camera sits permanently at
 `(0,0,0)` and each frame writes every body's position as its offset from the camera times
 `KM_TO_UNITS`. All float32 ever has to express is how far something is from the camera, so
@@ -177,7 +188,8 @@ Rings use a `MeshBasicMaterial` rather than a lit one. Their normal points along
 and sunlight arrives at a grazing angle, so a Lambertian model renders them nearly black, while
 real rings come close to the planet's own brightness thanks to strong backscatter. Brightness is
 therefore taken straight from the inverse square of the solar distance and left for
-auto-exposure to compress. Two things are layered on top of that in a small shader patch.
+auto-exposure to compress. The custom shading then handles both directions of shadowing and the
+two viewing sides.
 
 **The planet's shadow.** A ring point is eclipsed when it lies behind the planet along the Sun
 direction and inside its silhouette. Squashing space along the polar axis turns the oblate
@@ -193,13 +205,20 @@ reaches the eye is light that came through them. Dense regions go dark while thi
 comparatively bright, which is the contrast inversion Cassini photographed from Saturn's unlit
 side. The model is `gain * exp(-k * alpha)` against the ring texture's alpha, with the alpha
 channel still doing the occlusion, so the shaded face reads as a faint ghost of the lit one
-rather than disappearing. Setting `RING_TRANSMIT` to 0 blanks it entirely instead.
+rather than disappearing. A small multiple-scattering/planetshine floor prevents opaque bands
+from becoming mathematically black.
+
+**The ring's shadow on the planet.** Each surface fragment casts a ray towards the Sun, finds
+where that ray crosses the body's equatorial plane, and samples the same radial ring alpha map
+used for drawing. Only direct diffuse and specular light are attenuated, so the night map and
+ambient term remain independent. This also means the Cassini division
+appears in the projected shadow instead of being replaced by one uniform dark stripe.
 
 Which face is lit is decided on the CPU and passed in as `uLitFacing`. Deriving it in the
 shader from `gl_FrontFacing` is a trap: `RingGeometry` reports front-facing when viewed from its
 local **-Z**, the opposite of what its +Z normals suggest, which silently swaps the lit and
-shaded sides. The ring also fades out over the last 1.7 degrees before edge-on, where a
-zero-thickness disc covers almost no pixels anyway.
+shaded sides. The ring is explicitly double-sided and fades only over the final 0.23 degrees
+before exact edge-on, where a zero-thickness disc physically covers almost no pixels.
 
 Which face is lit follows the real season. Saturn passed equinox in May 2025, so the simulation
 puts the sub-solar ring latitude at -7.1 degrees in August 2026 and deepening, leaving the
@@ -207,8 +226,15 @@ southern face lit into the 2030s. Rotating more than about eight degrees above t
 the sunward side therefore crosses the ring plane and brings you round to the shaded face, which
 is correct geometry rather than a bug.
 
-Still missing: the rings cast no shadow onto the planet, and the shadowed part of the rings
-receives no Saturnshine, so it goes fully black rather than very dark.
+## Eclipses
+
+Surface eclipses use the finite angular size of both the Sun and every potential occluder. The
+overlap area of two discs is solved analytically per fragment, so total, partial and annular
+phases have continuous penumbrae instead of a binary point-light shadow. Candidate selection is
+done on the CPU and the three most relevant casters are sent to each visible body, keeping the
+GPU cost bounded. Satellite mean anomalies are approximate and omit long-period perturbations,
+so `?date=` is reproducible within this simulation but should not be treated as an astronomical
+eclipse ephemeris.
 
 ## The belts
 
@@ -288,8 +314,9 @@ colour driving its orbit line, label and info panel title, assigned only where t
 obvious intuitive choice and otherwise left at a neutral grey. These identify rather than
 describe, so a distant dot keeps its real colour and ignores the theme.
 
-`H` collapses the interface down to the HELIOS mark, for screenshots and for watching. Body
-labels are unaffected, since they belong to the scene and have their own toggle on `N`.
+`H` collapses the interface down to the HELIOS mark, for screenshots and for watching; phones
+also retain one small restore control so touch users cannot trap themselves. Body labels are
+unaffected, since they belong to the scene and have their own toggle on `N`.
 
 ## Coordinates
 
@@ -306,24 +333,23 @@ is inclined 5.145 degrees to the ecliptic. Satellite `M0` values are frequently 
 
 ## Textures
 
-The art in `solar_textures/` is mostly 8192x4096 jpg, about 66 MB across the 14 files actually
-referenced, while `assets.js` downsamples everything to `TEXTURE_MAX_WIDTH` (2048) during decode
-at runtime. Roughly 94% of every downloaded pixel was being discarded, so
-`scripts/build-textures.mjs` shrinks them at build time and converts to webp.
+The observed art in `solar_textures/` is mostly 8192x4096 jpg, while the dedicated generated
+maps are 2048x1024. `assets.js` caps surface textures at `TEXTURE_MAX_WIDTH` (2048), so
+`scripts/build-textures.mjs` shrinks the larger sources at build time and converts every used
+asset to webp. The builder reads the body table as well as literal source URLs, so dynamically
+constructed, clearly-labelled generated filenames cannot silently fall out of a production
+build.
 
 ```bash
 npm run textures            # vite build calls this automatically
 npm run textures -- --force # ignore the cache and re-encode, about 5 seconds
 ```
 
-| | Original | Derived |
-| --- | --- | --- |
-| 14 referenced textures | 66.28 MB | 2.49 MB (26.6x) |
-| Whole `dist/` | ~67 MB | 2.9 MB |
-
-Quality is unchanged, because 2048 wide is what the runtime was showing all along. An A/B pixel
-comparison at matched camera and time gives a mean absolute difference of 0.64/255 for Earth and
-0.14 for Saturn, all of it from webp q82 and the source jpg's own artefacts.
+The command prints the current input and output totals; they are intentionally not duplicated
+here because adding a body or map changes them. Quality of the high-resolution sources is
+unchanged at runtime, because 2048 wide is what the renderer was showing all along. An earlier
+A/B pixel comparison at matched camera and time measured a mean absolute difference of 0.64/255
+for Earth and 0.14 for Saturn, all of it from webp q82 and the source jpg's own artefacts.
 
 The original 8K art stays untouched, so raising `TEXTURE_MAX_WIDTH` later only needs a re-run.
 The sky is the one width exception, since `sky.js` bypasses `assets.js` and uses whatever it
@@ -343,6 +369,16 @@ about 134 MB of VRAM. Earth's night side needed a shader patch, since three's bu
 `emissiveMap` adds unconditionally and would glow in daylight, so a mask built from the sun
 angle restricts it to beyond the terminator.
 
+All 36 bodies now declare a dedicated surface map. The 26 new maps are AI-assisted visual
+approximations informed by spacecraft imagery where coverage exists and by measured colour,
+albedo and composition where a distant object remains unresolved. They are deliberately named
+`2k_*_generated.jpg`, and their complete prompt, scientific basis and uncertainty level are in
+[`solar_textures/GENERATED_TEXTURES.md`](solar_textures/GENERATED_TEXTURES.md). In particular,
+the geography shown for unresolved trans-Neptunian objects is illustrative, not observed data.
+
+No surface map is generated at runtime. A failed image load leaves a cheap solid-colour failure
+state and a console warning, rather than hiding a broken asset behind an expensive substitute.
+
 ## Deployment
 
 `.github/workflows/deploy.yml` builds and publishes on every push to `main`. The repository
@@ -361,12 +397,14 @@ src/
   i18n.js              bilingual string tables and language detection
   data/bodies.js       radii, J2000 elements, IAU poles and rotation, GM, theme colours, textures
   sim/kepler.js        Kepler solver, elements to position, equatorial and IAU meridian conversion
+  sim/occultation.js   pure finite-disc overlap calculation, shared with tests
   sim/system.js        body hierarchy, position and rotation propagation
   control/cameraRig.js double-precision camera: free, focus, straight-line flight
-  control/input.js     mouse and keyboard bindings
+  control/input.js     mouse, touch and keyboard bindings
   render/bodyView.js   sphere, dot, rings, clouds, and the four stellar light layers
-  render/assets.js     real texture loading with downsampling at decode
-  render/textures.js   procedural surfaces and sprite textures
+  render/illumination.js finite-disc eclipses and ring-to-planet shadows
+  render/assets.js     observed/generated texture loading with downsampling at decode
+  render/textures.js   lightweight ring-data and screen-space effect textures
   render/orbits.js     orbit lines, phase-anchored to the body
   render/belts.js      asteroid and Kuiper belt particles, Kepler solved in the vertex shader
   render/lagrange.js   Lagrange points L1 to L5
@@ -378,8 +416,11 @@ scripts/
   build-textures.mjs   build-time 8K to 2048px webp conversion
 .github/workflows/
   deploy.yml           build and publish to GitHub Pages on push to main
+test/
+  physics.test.js      Kepler, eclipse geometry and texture-asset invariants
 ```
 
 ## Not yet done
 
-Eclipse and ring shadows, atmospheric scattering, comets, and a time control in the interface.
+Comets, a time scrubber/date picker in the interface and long-period orbital perturbations. The
+current date can still be set through `?date=`.

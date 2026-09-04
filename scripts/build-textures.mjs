@@ -19,6 +19,7 @@ import { existsSync } from 'node:fs';
 import { resolve, join, extname, basename } from 'node:path';
 import sharp from 'sharp';
 import { TEXTURE_MAX_WIDTH } from '../src/config.js';
+import { BODIES } from '../src/data/bodies.js';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const SRC_DIR = join(ROOT, 'solar_textures');
@@ -42,11 +43,20 @@ const WIDTH_OVERRIDE = {
   '8k_stars_milky_way.jpg': 8192,
 };
 
-/** Scan src/ and index.html, converting only textures that are actually referenced */
+/**
+ * Find every shipped texture. Most URLs are literals and can be found by scanning source, but
+ * generatedTexture() deliberately constructs its clearly-labelled filenames from body ids.
+ * Reading the declarative body table as well keeps the derivative build independent of how a
+ * texture URL happens to be written in source code.
+ */
 async function referencedNames() {
   const names = new Set();
   const collect = (text) => {
-    for (const m of text.matchAll(/solar_textures\/([\w.-]+)/g)) names.add(m[1]);
+    // Requiring a complete image extension ignores partial template literals such as
+    // `2k_${id}_generated.jpg`; their resolved values come from BODIES below.
+    for (const m of text.matchAll(/solar_textures\/([\w.-]+\.(?:jpe?g|png|webp))/gi)) {
+      names.add(m[1]);
+    }
   };
   const walk = async (dir) => {
     for (const e of await readdir(dir, { withFileTypes: true })) {
@@ -57,6 +67,11 @@ async function referencedNames() {
   };
   await walk(join(ROOT, 'src'));
   collect(await readFile(join(ROOT, 'index.html'), 'utf8'));
+  for (const definition of BODIES) {
+    for (const url of Object.values(definition.tex ?? {})) {
+      if (typeof url === 'string') collect(url);
+    }
+  }
   return names;
 }
 

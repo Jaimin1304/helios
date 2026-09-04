@@ -5,36 +5,33 @@ import {
 } from 'three';
 import { AU_KM, KM_TO_UNITS, DOT_SIZE_PX, DOT_TAKEOVER_PX, DOT_FULL_PX } from '../config.js';
 import {
-  makeSurface, makeRingTexture, getGlowTexture, getStarburstTexture, getGlareTexture,
+  makeRingTexture, getGlowTexture, getStarburstTexture, getGlareTexture,
 } from './textures.js';
 import { pickTexture } from './assets.js';
 import { smoothstep } from './noise.js';
 import { BODY_BY_ID } from '../data/bodies.js';
+import { SurfaceIllumination } from './illumination.js';
 
 const SUN_RADIUS_KM = BODY_BY_ID.get('sun').radius;
 
 /** Effective ring albedo, an empirical figure that folds in backscatter; combined with the
  *  inverse-square falloff it gives the final brightness */
 const RING_ALBEDO = 0.45;
-/** Cosine of the viewing angle over which a ring fades as it swings edge-on, about 1.7 degrees.
+/** Cosine of the viewing angle over which a ring fades as it swings edge-on, about 0.23 degrees.
  *  A zero-thickness disc covers almost no pixels there, so the fade goes unnoticed. */
-const RING_EDGE_FADE = 0.03;
+const RING_EDGE_FADE = 0.004;
 /** How steeply transmitted light falls off with ring density on the shaded face. Rings are
  *  translucent, so from the unlit side the thin gaps glow while the dense B ring goes dark. */
-const RING_EXTINCTION = 3.0;
-/** Gain on that transmitted term. Above 1 because the extinction has already cut it well below
- *  1 everywhere the rings are dense enough to see. Set to 0 to blank the shaded face instead. */
-const RING_TRANSMIT = 2.6;
+const RING_EXTINCTION = 2.4;
+/** Multiple scattering and planetshine keep the unlit face visible even in dense ring bands. */
+const RING_BACKLIGHT_FLOOR = 0.20;
 /** Scratch values for the ring shading maths */
 const RING_NORMAL = new Vector3();
 const RING_SUN = new Vector3();
 const RING_QUAT = new Quaternion();
-/** Night-side light intensity. Real city lights are orders of magnitude fainter than daylight;
- *  this value only aims for visible but clearly dimmer. */
-const NIGHT_INTENSITY = 0.45;
-/** Cloud shell height as a multiple of the surface radius (about 16 km for Earth) */
+/** Cloud shell height as a multiple of the surface radius (about 16 km for Earth). */
 const CLOUD_SHELL = 1.0025;
-/** How much faster the clouds turn than the surface, producing a slow relative drift */
+/** How much faster the clouds turn than the surface, producing a slow relative drift. */
 const CLOUD_DRIFT = 0.02;
 /** Solar limb brightness relative to disc centre (0.3 to 0.4 in the visible for the real Sun) */
 const LIMB_EDGE = 0.34;
@@ -69,7 +66,7 @@ function segmentsFor(body) {
  * are written each frame by the floating origin.
  */
 export class BodyView {
-  /** @param {Map<string, import('three').Texture>} assets preloaded real textures */
+  /** @param {Map<string, import('three').Texture>} assets preloaded surface/effect textures */
   constructor(body, scene, assets = new Map()) {
     this.body = body;
     const def = body.def;
@@ -84,26 +81,26 @@ export class BodyView {
     // land in the local XY plane.
     geo.rotateX(Math.PI / 2);
 
-    // Use the real texture where one exists, otherwise fall back to a procedural surface
-    const realMap = pickTexture(assets, def.tex?.map);
+    const surfaceMap = pickTexture(assets, def.tex?.map);
     const nightMap = pickTexture(assets, def.tex?.night);
     const cloudMap = pickTexture(assets, def.tex?.clouds, 'linear');
-    let bump = null;
-    let map = realMap;
-    if (!map) ({ map, bump } = makeSurface(def));
-
+    const ringMap = def.rings
+      ? pickTexture(assets, def.tex?.ring) || makeRingTexture(def)
+      : null;
     if (body.kind === 'star') {
-      this.material = new MeshBasicMaterial({ map, toneMapped: false });
+      this.material = new MeshBasicMaterial({
+        map: surfaceMap,
+        color: surfaceMap ? 0xffffff : def.palette?.at(-1) ?? '#ffffff',
+        toneMapped: false,
+      });
       this.#attachLimbDarkening();
     } else {
       this.material = new MeshStandardMaterial({
-        map,
-        bumpMap: bump,
-        bumpScale: bump ? Math.min(1.2, radiusUnits * 0.06 + 0.02) : 0,
+        map: surfaceMap,
+        color: surfaceMap ? 0xffffff : def.palette?.at(-1) ?? '#888888',
         roughness: 0.92,
         metalness: 0.0,
       });
-      if (nightMap) this.#attachNightSide(nightMap);
     }
 
     this.mesh = new Mesh(geo, this.material);
@@ -120,17 +117,23 @@ export class BodyView {
     this.spinQuat = new Quaternion();
     this.spinAxis = new Vector3(0, 0, 1);
     // Flattening: squash along the spin axis
+    const axes = def.axes ?? [1, 1, 1];
     const f = def.flattening || 0;
-    if (f > 0) this.mesh.scale.set(1, 1, 1 - f);
+    this.bodyScale = new Vector3(axes[0], axes[1], axes[2] * (1 - f));
+    this.mesh.scale.copy(this.bodyScale);
+
+    this.illumination = body.kind === 'star'
+      ? null
+      : new SurfaceIllumination(this.material, body, { nightMap, ringMap });
 
     scene.add(this.mesh);
 
-    // ---- Cloud shell ----
+    // Clouds remain an independent transparent surface so they can drift above Earth's map.
     this.clouds = null;
     if (cloudMap) {
-      const cgeo = new SphereGeometry(radiusUnits * CLOUD_SHELL, ws, hs);
-      cgeo.rotateX(Math.PI / 2);
-      this.clouds = new Mesh(cgeo, new MeshStandardMaterial({
+      const cloudGeometry = new SphereGeometry(radiusUnits * CLOUD_SHELL, ws, hs);
+      cloudGeometry.rotateX(Math.PI / 2);
+      this.clouds = new Mesh(cloudGeometry, new MeshStandardMaterial({
         color: 0xffffff,
         alphaMap: cloudMap,
         transparent: true,
@@ -141,13 +144,15 @@ export class BodyView {
       this.clouds.frustumCulled = false;
       this.clouds.renderOrder = 2;
       this.clouds.quaternion.copy(this.frameQuat);
-      this.clouds.scale.copy(this.mesh.scale);
+      this.clouds.scale.copy(this.bodyScale);
       scene.add(this.clouds);
     }
 
     // ---- Fixed-screen-size dot, which takes over once a body is too small to see ----
     const isStar = body.kind === 'star';
-    const tint = new Color(def.palette ? def.palette[def.palette.length - 1] : '#ffffff');
+    const tint = new Color(def.palette
+      ? def.palette[def.palette.length - 1]
+      : '#ffffff');
     // A star's tint is pushed deliberately past 1.0 so the core clips to pure white and the
     // spikes' midtones brighten with it. Without a post-process bloom this is the closest
     // approximation to an overexposed light source.
@@ -229,7 +234,7 @@ export class BodyView {
       // left for auto-exposure to compress.
       this.ringTint = new Color(def.rings.tint || '#d0c0a0');
       this.rings = new Mesh(rgeo, new MeshBasicMaterial({
-        map: pickTexture(assets, def.tex?.ring) || makeRingTexture(def),
+        map: ringMap,
         transparent: true,
         side: DoubleSide,
         depthWrite: false,
@@ -257,7 +262,6 @@ export class BodyView {
       uLitFacing: { value: 1 },
       uPlanetR: { value: this.body.equatorialRadius * KM_TO_UNITS },
       uPenumbra: { value: 0 },
-      uTransmit: { value: RING_TRANSMIT },
     };
 
     this.rings.material.onBeforeCompile = (shader) => {
@@ -273,7 +277,6 @@ export class BodyView {
           uniform float uLitFacing;
           uniform float uPlanetR;
           uniform float uPenumbra;
-          uniform float uTransmit;
           varying vec3 vRingLocal;`)
         .replace('#include <map_fragment>', `#include <map_fragment>
           {
@@ -299,7 +302,9 @@ export class BodyView {
             // lit and shaded sides backwards.
             if (uLitFacing < 0.0) {
               float tau = texture2D(map, vMapUv).a;
-              diffuseColor.rgb *= uTransmit * exp(-${RING_EXTINCTION.toFixed(2)} * tau);
+              float transmitted = ${RING_BACKLIGHT_FLOOR.toFixed(2)}
+                + ${(1 - RING_BACKLIGHT_FLOOR).toFixed(2)} * exp(-${RING_EXTINCTION.toFixed(2)} * tau);
+              diffuseColor.rgb *= transmitted;
             }
           }`);
     };
@@ -340,44 +345,6 @@ export class BodyView {
   }
 
   /**
-   * Night-side city lights. three's built-in emissiveMap adds unconditionally and would glow
-   * in daylight too, so a small shader patch masks it by the angle between the sun direction
-   * and the normal, lighting only the unlit hemisphere.
-   */
-  #attachNightSide(nightMap) {
-    this.sunViewPos = new Vector3(0, 0, 1);
-    const extra = {
-      uSunViewPos: { value: this.sunViewPos },
-      uNightMap: { value: nightMap },
-      uNightIntensity: { value: NIGHT_INTENSITY },
-    };
-    this.material.onBeforeCompile = (shader) => {
-      Object.assign(shader.uniforms, extra);
-      shader.fragmentShader = shader.fragmentShader
-        .replace('#include <common>', `#include <common>
-          uniform vec3 uSunViewPos;
-          uniform sampler2D uNightMap;
-          uniform float uNightIntensity;`)
-        .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
-          {
-            vec3 fragPos = -vViewPosition;                       // fragment position in view space
-            vec3 sunDir = normalize(uSunViewPos - fragPos);
-            float ndl = dot(normal, sunDir);
-            float nightMask = 1.0 - smoothstep(-0.15, 0.12, ndl); // lit only beyond the terminator
-            totalEmissiveRadiance += texture2D(uNightMap, vMapUv).rgb * nightMask * uNightIntensity;
-          }`);
-    };
-    // Without this it would share a compiled program with any other MeshStandardMaterial
-    // carrying the same parameters
-    this.material.customProgramCacheKey = () => 'helios-nightside';
-  }
-
-  /** The main loop feeds in the Sun's view-space position each frame, for the night-side mask */
-  setSunViewPos(v) {
-    this.sunViewPos?.copy(v);
-  }
-
-  /**
    * Per-frame update: write the camera-relative position and cross-fade between sphere and dot
    * according to screen size.
    * @param {import('three').Vector3} rel position relative to the camera (scene units)
@@ -391,7 +358,6 @@ export class BodyView {
     this.spinQuat.setFromAxisAngle(this.spinAxis, this.body.spin);
     this.mesh.quaternion.copy(this.frameQuat).multiply(this.spinQuat);
     if (this.clouds) {
-      // Clouds run slightly faster than the surface, producing a slow relative drift
       this.spinQuat.setFromAxisAngle(this.spinAxis, this.body.spin * (1 + CLOUD_DRIFT));
       this.clouds.quaternion.copy(this.frameQuat).multiply(this.spinQuat);
     }

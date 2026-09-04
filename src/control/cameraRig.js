@@ -81,11 +81,17 @@ export class CameraRig {
   }
 
   zoom(delta) {
-    const next = this.dist * Math.exp(delta * 0.0013);
+    this.setDistance(this.dist * Math.exp(delta * 0.0013));
+  }
+
+  /** Set a validated camera distance, used by both wheel zoom and deep links. */
+  setDistance(next) {
+    if (!Number.isFinite(next)) return false;
     const min = this.mode === 'focus' && this.focus
       ? this.focus.radius * FOCUS_MIN_DIST_FACTOR
       : FREE_DIST_MIN;
     this.dist = clamp(next, min, FREE_DIST_MAX);
+    return true;
   }
 
   /**

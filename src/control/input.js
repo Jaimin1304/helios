@@ -1,10 +1,27 @@
 /**
- * Mouse and keyboard bindings, deliberately shaped like Blender's: middle button pans,
- * right button orbits, wheel zooms, double-click flies to a body, and a middle click
- * while focused releases it.
+ * Pointer and keyboard bindings. Mouse controls are deliberately shaped like Blender's;
+ * touch uses one finger to orbit and two fingers to pan/zoom.
  */
 export function attachInput(canvas, rig, hooks) {
   const drag = { button: -1, x: 0, y: 0, moved: 0 };
+  const touches = new Map();
+  let gesture = null;
+  let touchMoved = 0;
+  let touchHadMultiple = false;
+  let lastTap = null;
+
+  const touchMetrics = () => {
+    const points = [...touches.values()];
+    if (!points.length) return null;
+    if (points.length === 1) return { count: 1, x: points[0].x, y: points[0].y, distance: 0 };
+    const [a, b] = points;
+    return {
+      count: 2,
+      x: (a.x + b.x) / 2,
+      y: (a.y + b.y) / 2,
+      distance: Math.hypot(a.x - b.x, a.y - b.y),
+    };
+  };
 
   const stop = (e) => {
     e.preventDefault();
@@ -15,6 +32,21 @@ export function attachInput(canvas, rig, hooks) {
   canvas.addEventListener('auxclick', stop);
 
   canvas.addEventListener('pointerdown', (e) => {
+    canvas.focus({ preventScroll: true });
+    if (e.pointerType === 'touch') {
+      stop(e);
+      canvas.setPointerCapture(e.pointerId);
+      if (touches.size === 0) {
+        touchMoved = 0;
+        touchHadMultiple = false;
+        if (rig.mode === 'free') rig.snapPivotToEcliptic();
+      }
+      touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      touchHadMultiple ||= touches.size > 1;
+      gesture = touchMetrics();
+      canvas.classList.add('grabbing');
+      return;
+    }
     if (e.button !== 0 && e.button !== 1 && e.button !== 2) return;
     if (e.button === 1) e.preventDefault(); // suppress Windows middle-click autoscroll
     canvas.setPointerCapture(e.pointerId);
@@ -30,6 +62,26 @@ export function attachInput(canvas, rig, hooks) {
   });
 
   canvas.addEventListener('pointermove', (e) => {
+    if (e.pointerType === 'touch') {
+      const point = touches.get(e.pointerId);
+      if (!point) return;
+      stop(e);
+      touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      const next = touchMetrics();
+      if (gesture?.count === next.count) {
+        const dx = next.x - gesture.x;
+        const dy = next.y - gesture.y;
+        touchMoved += Math.abs(dx) + Math.abs(dy);
+        if (!rig.busy && next.count === 1) {
+          rig.orbit(dx, dy);
+        } else if (!rig.busy && next.count === 2) {
+          if (rig.mode === 'free') rig.pan(dx, dy, canvas.clientHeight);
+          rig.zoom((gesture.distance - next.distance) * 2.2);
+        }
+      }
+      gesture = next;
+      return;
+    }
     if (drag.button < 0) {
       hooks.onHover?.(e.clientX, e.clientY);
       return;
@@ -51,6 +103,30 @@ export function attachInput(canvas, rig, hooks) {
   });
 
   const endDrag = (e) => {
+    if (e.pointerType === 'touch') {
+      if (!touches.has(e.pointerId)) return;
+      stop(e);
+      touches.delete(e.pointerId);
+      gesture = touchMetrics();
+      if (canvas.hasPointerCapture?.(e.pointerId)) canvas.releasePointerCapture(e.pointerId);
+      if (touches.size === 0) {
+        canvas.classList.remove('grabbing');
+        if (e.type === 'pointerup' && !touchHadMultiple && touchMoved <= 8) {
+          const body = hooks.pick(e.clientX, e.clientY);
+          const now = performance.now();
+          const doubleTap = body && lastTap?.body === body && now - lastTap.time <= 360
+            && Math.hypot(e.clientX - lastTap.x, e.clientY - lastTap.y) <= 28;
+          if (doubleTap) {
+            hooks.onFocus(body);
+            lastTap = null;
+          } else {
+            hooks.onSelect(body);
+            lastTap = body ? { body, time: now, x: e.clientX, y: e.clientY } : null;
+          }
+        }
+      }
+      return;
+    }
     if (drag.button < 0) return;
     const btn = drag.button;
     const moved = drag.moved;
@@ -85,6 +161,7 @@ export function attachInput(canvas, rig, hooks) {
 
   window.addEventListener('keydown', (e) => {
     if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.repeat) return; // toggles should advance once per physical key press
     switch (e.key.toLowerCase()) {
       case 'escape': hooks.onRelease(); break;
       case 'o': hooks.onToggle('orbits'); break;

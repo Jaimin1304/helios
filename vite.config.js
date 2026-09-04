@@ -24,8 +24,8 @@ export default defineConfig(async ({ command }) => {
     base: './',
     build: { target: 'es2022', chunkSizeWarningLimit: 2048 },
     define: { __TEX_MAP__: JSON.stringify(tex.map) },
-    plugins: [
-      {
+    plugins: command === 'build'
+      ? [{
         name: 'helios-emit-textures',
         closeBundle() {
           const dest = resolve(root, 'dist/solar_textures');
@@ -36,7 +36,7 @@ export default defineConfig(async ({ command }) => {
             filter: (src) => !src.endsWith('manifest.json'),
           });
         },
-      },
-    ],
+      }]
+      : [],
   };
 });

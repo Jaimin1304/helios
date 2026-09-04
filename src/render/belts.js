@@ -272,10 +272,6 @@ export class Belts {
     this.kuiper = new Belt(BELTS.kuiper, 'kuiperbelt', scene, pixelRatio);
   }
 
-  get count() {
-    return BELTS.main.count + BELTS.kuiper.count;
-  }
-
   update(sunRel, viewScaleKm, sunDistKm, focalPx, timeDays) {
     this.main.update(sunRel, viewScaleKm, sunDistKm, focalPx, timeDays);
     this.kuiper.update(sunRel, viewScaleKm, sunDistKm, focalPx, timeDays);

@@ -101,6 +101,7 @@ export class LagrangePoints {
     this.enabled = false;
     this.systems = [];
     this.shownCount = 0;
+    this.placedLabels = [];
 
     for (const body of bodies) {
       const parent = body.parent;
@@ -191,7 +192,7 @@ export class LagrangePoints {
    */
   update(camPosKm, project, focalPx, viewW, viewH) {
     if (!this.enabled) return;
-    const placed = [];
+    this.placedLabels.length = 0;
     let systemsShown = 0;
 
     for (let si = 0; si < this.systems.length; si++) {
@@ -232,14 +233,14 @@ export class LagrangePoints {
           continue;
         }
         let clash = false;
-        for (const q of placed) {
+        for (const q of this.placedLabels) {
           if (Math.hypot(p.x - q.x, p.y - q.y) < LABEL_MIN_GAP_PX) { clash = true; break; }
         }
         if (clash) {
           this.#hide(sys, k);
           continue;
         }
-        placed.push(p);
+        this.placedLabels.push(p);
         sys.els[k].style.transform = `translate3d(${p.x.toFixed(1)}px, ${p.y.toFixed(1)}px, 0)`;
         if (!sys.shown[k]) {
           sys.els[k].style.display = 'block';

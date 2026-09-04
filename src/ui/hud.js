@@ -1,6 +1,15 @@
 import { AU_KM, TIME_SCALES } from '../config.js';
-import { formatUnit } from '../render/grid.js';
 import { LANG, T } from '../i18n.js';
+
+function formatUnit(km) {
+  if (km >= 0.005 * AU_KM) {
+    const au = km / AU_KM;
+    return `${au >= 1 ? au.toFixed(au < 10 ? 1 : 0) : au.toFixed(3)} AU`;
+  }
+  if (km >= 1e6) return T.millionKm((km / 1e6).toFixed(0));
+  if (km >= 1000) return T.thousandKm((km / 1000).toFixed(0));
+  return `${km.toFixed(0)} km`;
+}
 
 function fmtDistance(km) {
   if (km < 1) return `${(km * 1000).toFixed(0)} m`;
@@ -52,13 +61,17 @@ export class Hud {
     this.info = document.getElementById('info');
     this.infoName = document.getElementById('info-name');
     this.infoEn = document.getElementById('info-en');
+    this.infoToggle = document.getElementById('info-toggle');
     this.rows = document.getElementById('info-rows');
+    this.mobileControls = document.getElementById('mobile-controls');
     this.loading = document.getElementById('loading');
     this.loaderFill = document.getElementById('loader-fill');
     this.loaderMsg = document.getElementById('loader-msg');
     this.uiHidden = false;
     this._mode = null;
     this._body = null;
+
+    this.infoToggle.addEventListener('click', () => this.toggleInfo());
   }
 
   progress(frac, msg) {
@@ -71,10 +84,38 @@ export class Hud {
     setTimeout(() => this.loading.remove(), 700);
   }
 
-  /** H: collapse or restore the whole interface, leaving only the HELIOS mark */
+  failLoading(message) {
+    this.loaderFill.style.width = '100%';
+    this.loaderFill.classList.add('failed');
+    this.loaderMsg.textContent = message;
+  }
+
+  /** H: collapse or restore the interface. Mobile keeps one reachable restore control. */
   toggleUi() {
     this.uiHidden = !this.uiHidden;
     this.root.classList.toggle('ui-hidden', this.uiHidden);
+    return !this.uiHidden;
+  }
+
+  toggleInfo(expanded = !this.info.classList.contains('expanded')) {
+    this.info.classList.toggle('expanded', expanded);
+    this.infoToggle.setAttribute('aria-expanded', String(expanded));
+    this.infoToggle.setAttribute('aria-label', expanded ? T.infoCollapse : T.infoExpand);
+    this.infoToggle.textContent = expanded ? '−' : '+';
+  }
+
+  onControl(callback) {
+    this.mobileControls.addEventListener('click', (event) => {
+      const button = event.target.closest('button[data-action]');
+      if (button) callback(button.dataset.action);
+    });
+  }
+
+  setControlState(action, active) {
+    const button = this.mobileControls.querySelector(`[data-action="${action}"]`);
+    if (button?.hasAttribute('aria-pressed')) {
+      button.setAttribute('aria-pressed', String(active));
+    }
   }
 
   setMode(mode, body) {
@@ -100,6 +141,9 @@ export class Hud {
     if (this._clock !== text) {
       this._clock = text;
       this.clockChip.textContent = text;
+      const button = this.mobileControls.querySelector('[data-action="time"]');
+      button.setAttribute('aria-label', `${T.mobileTime}: ${TIME_SCALES[index]}× · ${T.timeRates[index]}`);
+      button.title = `${TIME_SCALES[index]}× · ${T.timeRates[index]}`;
     }
   }
 

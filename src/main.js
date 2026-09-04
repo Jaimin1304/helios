@@ -18,6 +18,7 @@ import { EclipticGrid } from './render/grid.js';
 import { Belts } from './render/belts.js';
 import { LagrangePoints } from './render/lagrange.js';
 import { createSky } from './render/sky.js';
+import { updateIllumination } from './render/illumination.js';
 import { CameraRig } from './control/cameraRig.js';
 import { attachInput } from './control/input.js';
 import { Hud } from './ui/hud.js';
@@ -27,6 +28,7 @@ applyStaticStrings(); // place the static copy for the browser language before b
 
 const canvas = document.getElementById('view');
 const hud = new Hud();
+const query = new URLSearchParams(location.search);
 
 // ───────────────────────────── Renderer ─────────────────────────────
 const renderer = new WebGLRenderer({
@@ -56,7 +58,8 @@ scene.add(ambient);
 
 // ───────────────────────────── Scene contents ─────────────────────────────
 const system = new SolarSystem();
-system.setDate(new Date()); // the clock starts at the moment the page opens
+const requestedDate = query.get('date') ? new Date(query.get('date')) : null;
+system.setDate(requestedDate && Number.isFinite(requestedDate.getTime()) ? requestedDate : new Date());
 
 /** @type {Map<string, BodyView>} */
 const views = new Map();
@@ -73,6 +76,29 @@ let selected = null;
 let orbitOpacity = 1; // 0 turns orbit lines off
 let timeIndex = TIME_SCALE_DEFAULT_INDEX; // T cycles through TIME_SCALES
 
+/** One command path serves keyboard shortcuts and the mobile toolbar, keeping their state equal. */
+function toggleFeature(what) {
+  if (what === 'orbits') {
+    orbitOpacity = orbitOpacity > 0 ? 0 : 1;
+    hud.setControlState(what, orbitOpacity > 0);
+  } else if (what === 'labels') {
+    labels.setEnabled(!labels.enabled);
+    hud.setControlState(what, labels.enabled);
+  } else if (what === 'lagrange') {
+    lagrange.setEnabled(!lagrange.enabled);
+    hud.setControlState(what, lagrange.enabled);
+  } else if (what === 'grid') {
+    const mode = grid.cycle();
+    hud.setGrid(mode, grid.unitKm);
+    hud.setControlState(what, mode !== 'off');
+  } else if (what === 'ui') {
+    const visible = hud.toggleUi();
+    hud.setControlState(what, visible);
+  } else if (what === 'time') {
+    timeIndex = (timeIndex + 1) % TIME_SCALES.length;
+  }
+}
+
 // ───────────────────────── Per-frame scratch values ─────────────────────────
 const camPosKm = new Vector3();
 const relKm = new Vector3();
@@ -82,8 +108,7 @@ const rightV = new Vector3();
 const upV = new Vector3();
 const sunViewPos = new Vector3();
 const sunRel = new Vector3();
-/** Views that need the Sun's view-space position each frame (Earth's night-side lights) */
-const sunAwareViews = [];
+const occluders = [];
 
 let viewW = window.innerWidth;
 let viewH = window.innerHeight;
@@ -220,14 +245,17 @@ function frame(now) {
       sunViewPos.copy(relUnits).applyMatrix4(camera.matrixWorldInverse);
     }
   }
-  for (const v of sunAwareViews) v.setSunViewPos(sunViewPos);
-
   // Occlusion: a body hidden behind a planet should neither carry a label nor be clickable.
   // A screen-space test suffices, since the occluder is nearer and the target falls inside its disc.
-  const occluders = [];
+  occluders.length = 0;
   for (const b of system.bodies) {
     if (b.screen.visible && b.screen.px > 3) occluders.push(b);
   }
+
+  // Analytic finite-disc shadows cover solar/lunar eclipses and rings projected onto their
+  // planet. Surface shaders evaluate the shadow separately for every fragment so an umbra can
+  // cross the visible disc.
+  updateIllumination(system.bodies, views, camPosKm, camera.matrixWorldInverse, sunViewPos);
   for (const b of system.bodies) {
     const s = b.screen;
     s.occluded = false;
@@ -250,7 +278,7 @@ function frame(now) {
     ol.update(relUnits, focalPx / parentDistUnits, orbitOpacity, system.timeDays);
   }
 
-  grid.update(sunRel, rig.dist, camPosKm.length(), viewH);
+  grid.update(sunRel, rig.dist, viewH);
   grid.updateTicks(projectEcliptic, viewW, viewH);
   lagrange.update(camPosKm, projectEcliptic, focalPx, viewW, viewH);
   belts.update(sunRel, rig.dist, camPosKm.length(), focalPx, system.timeDays);
@@ -311,13 +339,12 @@ async function boot() {
     hud.progress(0.55 * (done / all), T.loadTextures(url.split('/').pop()));
   });
 
-  // 2) Build the body views. Anything without a real texture gets a procedural surface here.
+  // 2) Build the body views from the preloaded surface maps.
   const total = system.bodies.length;
   for (let i = 0; i < total; i++) {
     const body = system.bodies[i];
     const view = new BodyView(body, scene, assets);
     views.set(body.id, view);
-    if (view.sunViewPos) sunAwareViews.push(view);
     if (body.orbit) orbitLines.push(new OrbitLine(body, scene, system.timeDays));
     hud.progress(0.55 + 0.45 * ((i + 1) / total), T.loadSurface(body.name));
     if (i % 2 === 0) await yieldToBrowser();
@@ -345,42 +372,31 @@ async function boot() {
     onFocusSelected: () => {
       if (selected) focusBody(selected);
     },
-    onToggle: (what) => {
-      if (what === 'orbits') {
-        orbitOpacity = orbitOpacity > 0 ? 0 : 1;
-      } else if (what === 'labels') {
-        labels.setEnabled(!labels.enabled);
-      } else if (what === 'lagrange') {
-        lagrange.setEnabled(!lagrange.enabled);
-      } else if (what === 'grid') {
-        hud.setGrid(grid.cycle(), grid.unitKm);
-      } else if (what === 'ui') {
-        hud.toggleUi();
-      } else if (what === 'time') {
-        timeIndex = (timeIndex + 1) % TIME_SCALES.length;
-      }
-    },
+    onToggle: toggleFeature,
   });
+  hud.onControl(toggleFeature);
 
   hud.progress(1, T.loadReady);
   hud.finishLoading();
   selectBody(system.byId.get('earth'));
 
-  // Deep links: ?focus=saturn focuses a body, ?dist=45 sets the initial distance in AU
-  const q = new URLSearchParams(location.search);
-  const target = q.get('focus') && system.byId.get(q.get('focus'));
+  // Deep links: focus a body, set a distance in AU, or choose a reproducible UTC epoch.
+  const target = query.get('focus') && system.byId.get(query.get('focus'));
   if (target) {
     selectBody(target);
     rig.flyTo(target, true);
   }
-  if (q.has('dist')) rig.dist = parseFloat(q.get('dist')) * AU_KM;
+  if (query.has('dist')) rig.setDistance(Number(query.get('dist')) * AU_KM);
 
   lastT = performance.now();
   requestAnimationFrame(frame);
   window.__ready = true; // lets automated screenshots know the scene is ready
 }
 
-boot();
+boot().catch((error) => {
+  console.error('[helios] startup failed', error);
+  hud.failLoading(T.loadFailed);
+});
 
 // Exposed for tuning and debugging
 window.HELIOS = {

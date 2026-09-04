@@ -15,7 +15,6 @@ export const OBLIQUITY = 23.4392911 * DEG;
 /** Scene unit: 1 unit = 1000 km. The choice does not affect precision, since rendering
  *  is camera-relative; it just keeps near/far values in a readable range. */
 export const KM_TO_UNITS = 1e-3;
-export const UNITS_TO_KM = 1e3;
 export const AU_UNITS = AU_KM * KM_TO_UNITS;
 
 // ---- Camera ----

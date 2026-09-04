@@ -2,16 +2,13 @@ import {
   BufferGeometry, Float32BufferAttribute, LineBasicMaterial, LineSegments, Color, Group,
 } from 'three';
 import { AU_KM, KM_TO_UNITS, FOV, DEG } from '../config.js';
-import { T } from '../i18n.js';
 
 /**
  * Ecliptic coordinate frame centred on the Sun. The ecliptic plane is the scene's z = 0 plane.
  *
- * A fixed cell size is impossible at true scale, since satellite orbits and the Kuiper belt
- * are six orders of magnitude apart. The geometry is therefore built in normalised whole-cell
- * coordinates spanning +/-HALF cells, and each frame picks a cell size from the current view
- * scale and applies it as a uniform scale. Cell size and coverage grow together, so one piece
- * of geometry serves every scale.
+ * Geometry is built in normalised whole-AU coordinates spanning +/-HALF cells and scaled once
+ * at render time. Screen density only controls fading and label thinning, so the coordinate
+ * readings retain a stable physical meaning at every camera scale.
  */
 /** The cell is fixed at 1 AU, the only length in the solar system with physical meaning,
  *  which is what makes the readings worth anything */
@@ -95,16 +92,6 @@ function buildPolar(major) {
     }
   }
   return pts;
-}
-
-export function formatUnit(km) {
-  if (km >= 0.005 * AU_KM) {
-    const au = km / AU_KM;
-    return `${au >= 1 ? au.toFixed(au < 10 ? 1 : 0) : au.toFixed(3)} AU`;
-  }
-  if (km >= 1e6) return T.millionKm((km / 1e6).toFixed(0));
-  if (km >= 1000) return T.thousandKm((km / 1000).toFixed(0));
-  return `${km.toFixed(0)} km`;
 }
 
 export class EclipticGrid {
@@ -218,10 +205,9 @@ export class EclipticGrid {
   /**
    * @param {import('three').Vector3} sunRel Sun position relative to the camera (scene units)
    * @param {number} viewScaleKm current view scale, the camera-to-pivot distance in km
-   * @param {number} sunDistKm   camera-to-Sun distance in km
    * @param {number} viewportH   viewport height in pixels
    */
-  update(sunRel, viewScaleKm, sunDistKm, viewportH) {
+  update(sunRel, viewScaleKm, viewportH) {
     if (this.mode === 'off') return;
 
     this.group.position.copy(sunRel);

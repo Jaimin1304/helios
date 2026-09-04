@@ -19,6 +19,7 @@ export class LabelLayer {
     this.entries = [];
     /** Labels actually drawn this frame plus their screen rectangles, used for picking */
     this.placed = [];
+    this.candidates = [];
 
     for (const body of bodies) {
       const el = document.createElement('div');
@@ -73,7 +74,7 @@ export class LabelLayer {
     if (!this.enabled) return;
 
     this.placed.length = 0;
-    const candidates = [];
+    this.candidates.length = 0;
 
     for (const entry of this.entries) {
       const b = entry.body;
@@ -92,16 +93,16 @@ export class LabelLayer {
           continue;
         }
       }
-      candidates.push(entry);
+      this.candidates.push(entry);
     }
 
     // Important bodies claim space first; within a tier, the larger on screen wins
-    candidates.sort((a, b) => {
+    this.candidates.sort((a, b) => {
       const d = PRIORITY[a.body.kind] - PRIORITY[b.body.kind];
       return d !== 0 ? d : b.body.screen.px - a.body.screen.px;
     });
 
-    for (const entry of candidates) {
+    for (const entry of this.candidates) {
       const s = entry.body.screen;
       // The label hangs to the right of the body, clearing the disc edge for large ones
       const offX = Math.min(Math.max(6, s.px * 0.75), 46);
